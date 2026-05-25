@@ -35,6 +35,12 @@ from cli_modelarium.exceptions import (
     UnknownModelError,
     UnknownProviderError,
 )
+from cli_modelarium.assertions import (
+    AssertionResult,
+    count_failed,
+    count_passed,
+    run_assertions,
+)
 from cli_modelarium.io_safety import load_system_prompt
 from cli_modelarium.judging import (
     DEFAULT_CRITERIA,
@@ -346,8 +352,22 @@ def compare(
     help=f"Max concurrent calls per provider (default: {DEFAULT_CONCURRENCY}).",
 )
 @click.option("--local-url", help="Override the default URL for the local model server.")
-@click.option("--min-pass-rate", type=float, help="Exit non-zero if assertion pass rate is below this (Phase 9).")
-@click.option("--no-assertions", is_flag=True, help="Skip assertion checks (Phase 9).")
+@click.option(
+    "--min-pass-rate",
+    type=float,
+    help="Exit 1 if assertion pass rate falls below this threshold (0.0-1.0). "
+    "Default behaviour without this flag is strict: ANY assertion failure exits 1.",
+)
+@click.option(
+    "--no-assertions",
+    is_flag=True,
+    help="Skip assertion checks entirely. Pass/fail counts are zeroed and exit code reflects only call status.",
+)
+@click.option(
+    "--strict-assertions",
+    is_flag=True,
+    help="Make the default strict behaviour explicit (any assertion failure exits 1). Mutually exclusive with --min-pass-rate.",
+)
 @click.option("--no-judge", is_flag=True, help="Skip judge scoring (Phase 8).")
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
 @click.option("--force-large", is_flag=True, help=f"Bypass safety caps (max 1000 prompts, max 10000 calls).")
@@ -374,6 +394,7 @@ def batch(
     local_url: str | None,
     min_pass_rate: float | None,
     no_assertions: bool,
+    strict_assertions: bool,
     no_judge: bool,
     force: bool,
     force_large: bool,
@@ -386,7 +407,23 @@ def batch(
 
     Per-prompt system prompts: include `"system": "..."` in a JSON prompt
     object to override the command-line system prompt for that one prompt.
+
+    Assertions (JSON input only): include `"assertions": [...]` on a prompt
+    object. Exit codes: 0 = all passed, 1 = assertion failure(s) or pass
+    rate below --min-pass-rate, 2 = call failure or IO error. Call failures
+    win over assertion failures (2 > 1).
     """
+    # --strict-assertions and --min-pass-rate are alternatives; combining
+    # them is ambiguous, so reject upfront.
+    if strict_assertions and min_pass_rate is not None:
+        raise click.UsageError(
+            "--strict-assertions and --min-pass-rate are mutually exclusive."
+        )
+    if min_pass_rate is not None and not (0.0 <= min_pass_rate <= 1.0):
+        raise click.UsageError(
+            f"--min-pass-rate must be between 0.0 and 1.0 (got {min_pass_rate})."
+        )
+
     try:
         prompts = load_batch_file(file)
         if not prompts:
@@ -512,16 +549,52 @@ def batch(
         _print_error(redact_secrets(str(e)))
         sys.exit(EXIT_CALL_FAILED)
 
+    # Run assertions per-state. Failed-call states skip assertion execution
+    # (no real output to check). Successful-call states with no configured
+    # assertions get an empty list (not None) so they show as "0/0" - which
+    # is vacuously fine.
+    assertion_results_per_state: list[list[AssertionResult] | None] = []
+    for state, bp in pairs:
+        if no_assertions or state.error:
+            assertion_results_per_state.append(None)
+        elif not bp.assertions:
+            assertion_results_per_state.append([])
+        else:
+            assertion_results_per_state.append(
+                run_assertions(
+                    output=state.text,
+                    latency_ms=state.latency_ms,
+                    cost_usd=state.cost_usd,
+                    assertions=bp.assertions,
+                )
+            )
+
     # Convert StreamStates to BatchResults and emit.
     results = []
     for i, (state, bp) in enumerate(pairs):
         jr = judge_results[i] if judge_results is not None else None
-        results.append(state_to_result(state, bp, judge_result=jr))
+        ar = assertion_results_per_state[i]
+        results.append(state_to_result(state, bp, judge_result=jr, assertion_results=ar))
     _emit_batch_results(results, output_path=output_path, output_fmt=output_fmt)
 
     failed = sum(1 for r in results if r.error)
     success = len(results) - failed
     total_cost = sum(r.cost_usd for r in results if r.error is None)
+
+    # Tally assertion outcomes. count_passed excludes `error` rows from
+    # both numerator and denominator, so a missing-jsonschema doesn't
+    # poison the pass rate or trigger exit 1.
+    total_assertion_passed = 0
+    total_assertion_definitive = 0
+    total_assertion_failed = 0
+    for ar in assertion_results_per_state:
+        if ar is None:
+            continue
+        p, d = count_passed(ar)
+        total_assertion_passed += p
+        total_assertion_definitive += d
+        total_assertion_failed += count_failed(ar)
+
     summary_parts = [
         f"[green]{success} succeeded[/green]",
         f"[red]{failed} failed[/red]",
@@ -533,11 +606,37 @@ def batch(
         summary_parts.append(
             f"[dim]judge cost ${j_cost:.6f} ({j_calls} call{'s' if j_calls != 1 else ''})[/dim]"
         )
+    if total_assertion_definitive > 0 or total_assertion_failed > 0:
+        pass_rate = (
+            total_assertion_passed / total_assertion_definitive
+            if total_assertion_definitive > 0
+            else 1.0
+        )
+        rate_color = "green" if total_assertion_failed == 0 else "red"
+        summary_parts.append(
+            f"[{rate_color}]assertions {total_assertion_passed}/{total_assertion_definitive} "
+            f"({pass_rate * 100:.0f}%)[/{rate_color}]"
+        )
     console.print("  ".join(summary_parts))
 
-    # Phase 9 will use EXIT_ASSERTION_FAILED. For now, call failures exit 2.
+    # Exit-code logic. Call failures dominate - usually they mean the user
+    # needs to fix credentials/infra before they can even evaluate
+    # assertions, so we surface that as 2 rather than the softer 1.
     if failed > 0:
         sys.exit(EXIT_CALL_FAILED)
+
+    if not no_assertions:
+        if min_pass_rate is not None:
+            # --min-pass-rate threshold mode: tolerate some failures.
+            if total_assertion_definitive > 0:
+                pass_rate = total_assertion_passed / total_assertion_definitive
+                if pass_rate < min_pass_rate:
+                    sys.exit(EXIT_ASSERTION_FAILED)
+        else:
+            # Default / --strict-assertions: ANY failure exits 1.
+            if total_assertion_failed > 0:
+                sys.exit(EXIT_ASSERTION_FAILED)
+
     sys.exit(EXIT_OK)
 
 
