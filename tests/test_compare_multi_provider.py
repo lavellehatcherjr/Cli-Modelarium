@@ -79,7 +79,7 @@ async def test_runs_three_providers_in_parallel() -> None:
         prompt="test prompt",
         models=["gpt-5.5", "claude-opus-4-7", "gemini-3.1-pro"],
         temperatures=[0.0],
-        system_prompt=None,
+        system_prompts=[None],
         provider_factory=lambda name: fakes[name],
         live_display=False,
     )
@@ -106,7 +106,7 @@ async def test_one_failure_does_not_kill_others() -> None:
         prompt="p",
         models=["gpt-5.5", "claude-opus-4-7", "gemini-3.1-pro"],
         temperatures=[0.0],
-        system_prompt=None,
+        system_prompts=[None],
         provider_factory=lambda name: fakes[name],
         live_display=False,
     )
@@ -137,7 +137,7 @@ async def test_one_provider_instance_per_provider_not_per_model() -> None:
         prompt="p",
         models=["gpt-5.5", "gpt-5.4", "claude-opus-4-7"],
         temperatures=[0.0],
-        system_prompt=None,
+        system_prompts=[None],
         provider_factory=make,
         live_display=False,
     )
@@ -156,7 +156,7 @@ async def test_multiple_temperatures_fan_out() -> None:
         prompt="p",
         models=["gpt-5.5", "gpt-5.4"],
         temperatures=[0.0, 0.5, 1.0],
-        system_prompt=None,
+        system_prompts=[None],
         provider_factory=lambda _: fake,
         live_display=False,
     )
@@ -174,7 +174,7 @@ async def test_system_prompt_threaded_through() -> None:
         prompt="user",
         models=["gpt-5.5"],
         temperatures=[0.0],
-        system_prompt="you are helpful",
+        system_prompts=["you are helpful"],
         provider_factory=lambda _: fake,
         live_display=False,
     )
@@ -197,7 +197,7 @@ async def test_unexpected_exception_caught_as_state_error() -> None:
         prompt="p",
         models=["gpt-5.5", "claude-opus-4-7"],
         temperatures=[0.0],
-        system_prompt=None,
+        system_prompts=[None],
         provider_factory=lambda name: fakes[name],
         live_display=False,
     )
