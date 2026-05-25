@@ -21,7 +21,7 @@ from cli_modelarium.exceptions import (
 )
 from cli_modelarium.pricing import calculate_cost
 from cli_modelarium.providers._utils import extract_retry_after
-from cli_modelarium.providers.base import BaseProvider, CompletionResult
+from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
 
 
@@ -84,11 +84,16 @@ class OpenAIProvider(BaseProvider):
         model: str,
         temperature: float,
         system_prompt: str | None = None,
+        *,
+        on_chunk: OnChunk | None = None,
     ) -> CompletionResult:
         """Run a completion via streaming with usage included.
 
         Streaming with `stream_options={"include_usage": True}` gives us both
         token-by-token output (for TTFT) and final usage numbers in one call.
+
+        If `on_chunk` is provided it is called with each text chunk as it
+        arrives, so the streaming orchestrator can surface output live.
         """
         messages = self._build_messages(prompt, system_prompt)
         actual_model = self._transform_model(model)
@@ -110,9 +115,12 @@ class OpenAIProvider(BaseProvider):
             )
             async for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content:
+                    text = chunk.choices[0].delta.content
                     if ttft_ms is None:
                         ttft_ms = (time.monotonic() - start) * 1000
-                    chunks.append(chunk.choices[0].delta.content)
+                    if on_chunk is not None:
+                        on_chunk(text)
+                    chunks.append(text)
                 if getattr(chunk, "usage", None) is not None:
                     input_tokens = chunk.usage.prompt_tokens or 0
                     output_tokens = chunk.usage.completion_tokens or 0
