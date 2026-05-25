@@ -6,6 +6,7 @@ import sys
 from typing import Any
 
 import click
+import httpx
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -31,12 +32,16 @@ from cli_modelarium.pricing import (
     pricing_freshness_note,
 )
 from cli_modelarium.providers.base import BaseProvider
+from cli_modelarium.providers.local_provider import LocalProvider
 from cli_modelarium.security import (
     KEY_PATTERNS,
-    is_key_configured,
     delete_key,
+    delete_local_url,
+    is_key_configured,
+    load_local_url,
     redact_secrets,
     save_key,
+    save_local_url,
 )
 from cli_modelarium.streaming import (
     DEFAULT_CONCURRENCY,
@@ -56,6 +61,7 @@ PROVIDER_REGISTRY: dict[str, str] = {
     "groq": "cli_modelarium.providers.groq_provider:GroqProvider",
     "openrouter": "cli_modelarium.providers.openrouter_provider:OpenRouterProvider",
     "mistral": "cli_modelarium.providers.mistral_provider:MistralProvider",
+    "local": "cli_modelarium.providers.local_provider:LocalProvider",
 }
 
 # Exit codes used across the CLI (matches CI/CD conventions).
@@ -163,6 +169,9 @@ def compare(
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
 
+    def provider_factory(name: str) -> BaseProvider:
+        return _get_provider_instance(name, local_url=local_url)
+
     try:
         states = asyncio.run(
             run_streaming_comparison(
@@ -170,7 +179,7 @@ def compare(
                 models=model_list,
                 temperatures=temp_list,
                 system_prompt=system_prompt,
-                provider_factory=_get_provider_instance,
+                provider_factory=provider_factory,
                 console=console,
                 concurrency=concurrency,
                 live_display=not no_stream,
@@ -308,6 +317,12 @@ def keys_list() -> None:
         else:
             table.add_row(provider, "[dim]not configured[/dim]")
 
+    saved_local = load_local_url()
+    if saved_local:
+        table.add_row("local", f"[green]{saved_local}[/green]")
+    else:
+        table.add_row("local", f"[dim]default ({LocalProvider.DEFAULT_URL})[/dim]")
+
     console.print(table)
 
 
@@ -315,15 +330,31 @@ def keys_list() -> None:
 @click.argument("provider")
 @click.option("--base-url", help="(local provider only) Override default base URL.")
 def keys_set(provider: str, base_url: str | None) -> None:
-    """Set or update the API key for a provider (prompts securely)."""
+    """Set or update the API key for a provider (prompts securely).
+
+    For the local provider, pass --base-url to persist a default URL
+    instead of prompting for an API key.
+    """
     if provider == "local":
-        _print_error("local provider URL configuration arrives in Phase 5.")
-        sys.exit(EXIT_CALL_FAILED)
+        if not base_url:
+            _print_error(
+                "Local provider takes --base-url, not an API key.\n"
+                "  Example: cli-modelarium keys set local --base-url http://localhost:1234/v1"
+            )
+            sys.exit(EXIT_CALL_FAILED)
+        try:
+            LocalProvider._validate_local_url(base_url)
+        except ModelariumError as e:
+            _print_error(str(e))
+            sys.exit(EXIT_CALL_FAILED)
+        save_local_url(base_url)
+        console.print(f"[green]Saved local provider URL: {base_url}[/green]")
+        return
 
     if provider not in KEY_PATTERNS:
         _print_error(
             f"Unknown provider: {provider}.\n"
-            f"Supported providers: {', '.join(sorted(KEY_PATTERNS))}"
+            f"Supported providers: {', '.join(sorted(KEY_PATTERNS))}, local"
         )
         sys.exit(EXIT_CALL_FAILED)
 
@@ -349,6 +380,10 @@ def keys_set(provider: str, base_url: str | None) -> None:
 @click.argument("provider")
 def keys_delete(provider: str) -> None:
     """Remove the API key for a provider from the keychain."""
+    if provider == "local":
+        delete_local_url()
+        console.print("[green]Removed saved local provider URL.[/green]")
+        return
     delete_key(provider)
     console.print(f"[green]Removed {provider} key from keychain.[/green]")
 
@@ -357,25 +392,28 @@ def keys_delete(provider: str) -> None:
 
 
 @main.command("list-models")
-@click.option("--local", "local_only", is_flag=True, help="Show only local models.")
-def list_models(local_only: bool) -> None:
+@click.option("--local", "local_only", is_flag=True, help="Show only local models (queries the local server).")
+@click.option("--local-url", help="Override default URL for local-model discovery.")
+def list_models(local_only: bool, local_url: str | None) -> None:
     """List supported models, grouped by provider."""
-    providers = all_known_providers()
     if local_only:
-        providers = ["local"]
+        _list_local_models(local_url)
+        return
+
+    providers = all_known_providers()
 
     any_shown = False
     for provider in providers:
         models = list_models_for_provider(provider)
         if provider == "local":
-            models = [m for m in models if m != "local/*"]
+            # Local models are dynamic - skip the static section; we show
+            # discovered models when --local is passed.
+            continue
         if not models:
             continue
 
         any_shown = True
-        configured = (
-            "configured" if provider == "local" or is_key_configured(provider) else "not configured"
-        )
+        configured = "configured" if is_key_configured(provider) else "not configured"
         title = f"{provider} [dim]({configured})[/dim]"
 
         table = Table(title=title, border_style="dim", title_justify="left")
@@ -386,38 +424,119 @@ def list_models(local_only: bool) -> None:
 
         for model in models:
             entry = PRICING[model]
-            if entry.get("is_local"):
-                table.add_row(model, "[dim]Free[/dim]", "[dim]Free[/dim]", "[dim]-[/dim]")
-            else:
-                cached = entry.get("cached_input")
-                cached_text = f"${float(cached):.4f}" if cached is not None else "-"
-                table.add_row(
-                    model,
-                    f"${float(entry['input']):.4f}",
-                    f"${float(entry['output']):.4f}",
-                    cached_text,
-                )
+            cached = entry.get("cached_input")
+            cached_text = f"${float(cached):.4f}" if cached is not None else "-"
+            table.add_row(
+                model,
+                f"${float(entry['input']):.4f}",
+                f"${float(entry['output']):.4f}",
+                cached_text,
+            )
 
         console.print(table)
         console.print()
 
     if not any_shown:
-        if local_only:
-            console.print(
-                Panel(
-                    "Local models are routed by the `local/` prefix at runtime.\n"
-                    "Auto-discovery of installed Ollama/LM Studio models is a Phase 5 feature.\n\n"
-                    "Until then, use any model ID like:\n"
-                    "  cli-modelarium 'prompt' --models local/llama-3.3",
-                    title="Local models",
-                    border_style="cyan",
-                )
-            )
-            return
         _print_error("No models registered.")
         sys.exit(EXIT_CALL_FAILED)
 
+    console.print(
+        "[dim]Local models are routed by the `local/` prefix.[/dim] "
+        "[dim]Run `cli-modelarium list-models --local` to discover what's running locally.[/dim]"
+    )
     console.print(f"[dim]{pricing_freshness_note()}[/dim]")
+
+
+def _list_local_models(local_url: str | None) -> None:
+    """Query the local server's /models endpoint and render the result."""
+    url = local_url or load_local_url() or LocalProvider.DEFAULT_URL
+
+    try:
+        # Validate the URL up front - we want LocalURLError BEFORE any I/O.
+        LocalProvider._validate_local_url(url)
+    except ModelariumError as e:
+        _print_error(str(e))
+        sys.exit(EXIT_CALL_FAILED)
+
+    try:
+        models = asyncio.run(LocalProvider.discover_models(url))
+    except httpx.ConnectError:
+        console.print(
+            Panel(
+                f"Could not reach local server at {url}.\n\n"
+                f"Possible causes:\n"
+                f"  - Server not running (try: ollama serve)\n"
+                f"  - Wrong URL (use --local-url to override)\n"
+                f"  - Firewall blocking the connection",
+                title="Local models",
+                border_style="yellow",
+            )
+        )
+        return
+    except httpx.TimeoutException:
+        console.print(
+            Panel(
+                f"Timed out connecting to {url} "
+                f"(waited {LocalProvider.DISCOVERY_TIMEOUT_SECONDS:.0f}s).\n"
+                f"The server may be starting up or under heavy load.",
+                title="Local models",
+                border_style="yellow",
+            )
+        )
+        return
+    except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as e:
+        console.print(
+            Panel(
+                f"Local server at {url} returned an unexpected response:\n"
+                f"  {redact_secrets(str(e))}",
+                title="Local models",
+                border_style="yellow",
+            )
+        )
+        return
+
+    if not models:
+        console.print(
+            Panel(
+                f"Local server at {url} responded but has no models installed.\n"
+                f"For Ollama: ollama pull llama3.3",
+                title="Local models",
+                border_style="cyan",
+            )
+        )
+        return
+
+    table = Table(
+        title=f"local [dim]({url})[/dim]",
+        border_style="dim",
+        title_justify="left",
+    )
+    table.add_column("Model ID for cli-modelarium", style="bold")
+    table.add_column("Created", style="dim")
+    table.add_column("Owned by", style="dim")
+    table.add_column("Cost", justify="right")
+
+    for entry in models:
+        model_id = entry.get("id", "(unnamed)")
+        created = entry.get("created")
+        created_text = _format_unix_timestamp(created) if created else "-"
+        owned_by = str(entry.get("owned_by", "-"))
+        table.add_row(f"local/{model_id}", created_text, owned_by, "[dim]Free[/dim]")
+
+    console.print(table)
+    console.print(
+        f"\n[dim]Use these via: cli-modelarium 'prompt' --models local/{models[0].get('id', '<name>')}[/dim]"
+    )
+
+
+def _format_unix_timestamp(ts: object) -> str:
+    """Format a unix timestamp (int or float) as YYYY-MM-DD, or '-' if unparseable."""
+    try:
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError):
+        return "-"
 
 
 # ===== pricing =====
@@ -496,13 +615,27 @@ def _parse_temperatures(raw: str) -> list[float]:
     return out or [0.0]
 
 
-def _get_provider_instance(provider_name: str) -> BaseProvider:
-    """Instantiate the provider for `provider_name`, loading its API key."""
+def _get_provider_instance(
+    provider_name: str, *, local_url: str | None = None
+) -> BaseProvider:
+    """Instantiate the provider for `provider_name`.
+
+    For cloud providers: loads the API key from env var / keychain and
+    raises `KeyNotConfiguredError` if missing.
+
+    For the local provider: skips the API-key path entirely. The URL is taken
+    from `local_url` if provided, else from the keychain/env var, else
+    `LocalProvider.DEFAULT_URL`.
+    """
     if provider_name not in PROVIDER_REGISTRY:
         raise UnknownProviderError(
             f"Provider '{provider_name}' is not yet wired up. "
             f"Currently supported: {', '.join(sorted(PROVIDER_REGISTRY))}."
         )
+
+    if provider_name == "local":
+        url = local_url or load_local_url()
+        return LocalProvider(base_url=url)
 
     from cli_modelarium.security import load_key
 
