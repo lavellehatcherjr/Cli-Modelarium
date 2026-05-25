@@ -489,6 +489,38 @@ def test_streaming_display_renders_panels() -> None:
     assert len(list(group.renderables)) == 5
 
 
+def test_complete_panel_shows_free_for_local_models() -> None:
+    """Local models must display 'Free' in the complete panel, not '$0.000000'."""
+    from rich.console import Console
+
+    local = StreamState(
+        model="local/llama-3.3-70b",
+        provider_name="local",
+        temperature=0.0,
+        status="complete",
+        text="done",
+        ttft_ms=120.0,
+        cost_usd=0.0,
+    )
+    cloud = StreamState(
+        model="gpt-5.5",
+        provider_name="openai",
+        temperature=0.0,
+        status="complete",
+        text="done",
+        ttft_ms=120.0,
+        cost_usd=0.001234,
+    )
+
+    console = Console(record=True, width=120, color_system=None)
+    console.print(StreamingDisplay([local, cloud]).__rich__())
+    output = console.export_text()
+
+    assert "Free" in output
+    assert "$0.000000" not in output
+    assert "$0.001234" in output
+
+
 # ===== redaction in error state =====
 
 
