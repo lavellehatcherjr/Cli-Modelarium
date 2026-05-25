@@ -41,7 +41,14 @@ from cli_modelarium.assertions import (
     count_passed,
     run_assertions,
 )
-from cli_modelarium.io_safety import load_system_prompt
+from cli_modelarium.hallucination import (
+    HALLUCINATION_TOS_EXTENSION,
+    HallucinationConfig,
+    annotate_risk_levels,
+    parse_hallucination_response,
+    resolve_hallucination_config,
+)
+from cli_modelarium.io_safety import load_system_prompt, split_escaped_csv
 from cli_modelarium.judging import (
     DEFAULT_CRITERIA,
     JUDGE_PROMPT_TEMPLATE,
@@ -181,9 +188,25 @@ def main(ctx: click.Context) -> None:
     is_flag=True,
     help="Suppress the judge-use ToS reminder (for CI/CD where it's been acknowledged).",
 )
-@click.option("--check-hallucination", is_flag=True, help="Apply hallucination preset (Phase 10).")
-@click.option("--expected-facts", help="Comma-separated reference facts (Phase 10).")
-@click.option("--expected-facts-file", type=click.Path(), help="Load expected facts from file (Phase 10).")
+@click.option(
+    "--check-hallucination",
+    is_flag=True,
+    help="Apply the hallucination detection preset. Requires --judge or --judges.",
+)
+@click.option(
+    "--expected-facts",
+    help="Comma-separated reference facts for hallucination check. Use \\, for a literal comma.",
+)
+@click.option(
+    "--expected-facts-file",
+    type=click.Path(),
+    help="Load expected facts from a .txt (one per line) or .json (array of strings) file.",
+)
+@click.option(
+    "--hallucination-template",
+    type=click.Path(),
+    help="Override the hallucination criteria text with a custom UTF-8 file (max 1 MB).",
+)
 @click.option("--output", type=click.Path(), help="Output file path (Phase 7).")
 @click.option(
     "--output-format",
@@ -215,6 +238,7 @@ def compare(
     check_hallucination: bool,
     expected_facts: str | None,
     expected_facts_file: str | None,
+    hallucination_template: str | None,
     output: str | None,
     output_format: str | None,
     max_cost: float | None,
@@ -238,18 +262,41 @@ def compare(
             judge_criteria=judge_criteria,
             judge_template=judge_template,
         )
+        # Phase 10 hallucination preset overrides judge criteria + template
+        # AND swaps in the hallucination response parser. None when not active.
+        hallucination_config = resolve_hallucination_config(
+            check_hallucination=check_hallucination,
+            expected_facts=expected_facts,
+            expected_facts_file=expected_facts_file,
+            hallucination_template=hallucination_template,
+            judge_models_present=bool(judge_models),
+        )
+        if hallucination_config is not None:
+            judge_criteria_list = hallucination_config.criteria
+            judge_template_text = hallucination_config.template
         # Validate judge models BEFORE the main comparison runs - misconfigured
         # judges should not fail late after burning money on the comparison.
         if judge_models:
             _validate_judge_models(judge_models, local_url=local_url)
     except click.UsageError:
         raise
-    except (UnknownModelError, KeyNotConfiguredError, FileNotFoundError, ValueError) as e:
+    except (
+        UnknownModelError, KeyNotConfiguredError, BatchValidationError,
+        FileNotFoundError, ValueError,
+    ) as e:
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
 
     if judge_models and not no_judge_tos:
         print_tos_disclosure(console)
+        if hallucination_config is not None:
+            console.print(
+                Panel(
+                    HALLUCINATION_TOS_EXTENSION,
+                    title="Hallucination detection",
+                    border_style="yellow",
+                )
+            )
 
     def provider_factory(name: str) -> BaseProvider:
         return _get_provider_instance(name, local_url=local_url)
@@ -273,9 +320,16 @@ def compare(
                 criteria=judge_criteria_list,
                 provider_factory=provider_factory,
                 template=judge_template_text,
+                response_parser=(
+                    parse_hallucination_response
+                    if hallucination_config is not None
+                    else None
+                ),
                 skip_self_eval=True,
                 concurrency=concurrency,
             )
+            if hallucination_config is not None:
+                annotate_risk_levels(jrs)
         return states, jrs
 
     try:
@@ -289,7 +343,15 @@ def compare(
         _print_error(redact_secrets(str(e)))
         sys.exit(EXIT_CALL_FAILED)
 
-    _display_results(states, judge_results=judge_results, include_reasoning=include_reasoning)
+    _display_results(
+        states,
+        judge_results=judge_results,
+        include_reasoning=include_reasoning,
+        hallucination_mode=hallucination_config is not None,
+        hallucination_facts=(
+            hallucination_config.facts if hallucination_config else None
+        ),
+    )
 
     if any(s.error for s in states):
         sys.exit(EXIT_CALL_FAILED)
@@ -335,9 +397,25 @@ def compare(
     is_flag=True,
     help="Suppress the judge-use ToS reminder (for CI/CD where it's been acknowledged).",
 )
-@click.option("--check-hallucination", is_flag=True, help="Apply the hallucination detection preset (Phase 10).")
-@click.option("--expected-facts", help="Comma-separated reference facts (Phase 10).")
-@click.option("--expected-facts-file", type=click.Path(), help="Load expected facts from a file (Phase 10).")
+@click.option(
+    "--check-hallucination",
+    is_flag=True,
+    help="Apply the hallucination detection preset. Requires --judge or --judges.",
+)
+@click.option(
+    "--expected-facts",
+    help="Comma-separated reference facts. Use \\, for a literal comma.",
+)
+@click.option(
+    "--expected-facts-file",
+    type=click.Path(),
+    help="Load expected facts from a .txt (one per line) or .json (array of strings) file.",
+)
+@click.option(
+    "--hallucination-template",
+    type=click.Path(),
+    help="Override the hallucination criteria text with a custom UTF-8 file (max 1 MB).",
+)
 @click.option("--output", type=click.Path(), help="Output file path. Format auto-detected from extension; omit to render Markdown on stdout.")
 @click.option(
     "--output-format",
@@ -387,6 +465,7 @@ def batch(
     check_hallucination: bool,
     expected_facts: str | None,
     expected_facts_file: str | None,
+    hallucination_template: str | None,
     output: str | None,
     output_format: str | None,
     max_cost: float | None,
@@ -450,6 +529,19 @@ def batch(
             judge_criteria=judge_criteria,
             judge_template=judge_template,
         )
+        # Phase 10 hallucination preset; None when not active. Overrides
+        # judge criteria and template, and swaps in the hallucination
+        # response parser later.
+        hallucination_config = resolve_hallucination_config(
+            check_hallucination=check_hallucination,
+            expected_facts=expected_facts,
+            expected_facts_file=expected_facts_file,
+            hallucination_template=hallucination_template,
+            judge_models_present=bool(judge_models and not no_judge),
+        )
+        if hallucination_config is not None:
+            judge_criteria_list = hallucination_config.criteria
+            judge_template_text = hallucination_config.template
         # Validate judge models BEFORE the batch starts - misconfigured
         # judges should not fail late after burning batch money.
         if judge_models and not no_judge:
@@ -518,6 +610,14 @@ def batch(
 
     if judge_models and not no_judge and not no_judge_tos:
         print_tos_disclosure(console)
+        if hallucination_config is not None:
+            console.print(
+                Panel(
+                    HALLUCINATION_TOS_EXTENSION,
+                    title="Hallucination detection",
+                    border_style="yellow",
+                )
+            )
 
     async def _run_batch_and_judge() -> list[JudgeResult] | None:
         await run_batch(
@@ -528,15 +628,23 @@ def batch(
             show_progress=True,
         )
         if judge_models and not no_judge:
-            return await run_judging(
+            jrs = await run_judging(
                 items=[(s, bp.prompt) for s, bp in pairs],
                 judge_models=judge_models,
                 criteria=judge_criteria_list,
                 provider_factory=provider_factory,
                 template=judge_template_text,
+                response_parser=(
+                    parse_hallucination_response
+                    if hallucination_config is not None
+                    else None
+                ),
                 skip_self_eval=True,
                 concurrency=concurrency,
             )
+            if hallucination_config is not None:
+                annotate_risk_levels(jrs)
+            return jrs
         return None
 
     try:
@@ -1148,40 +1256,10 @@ def _resolve_system_prompts(
     return [None]
 
 
-def _split_escaped_csv(value: str) -> list[str]:
-    """Split a comma-separated string with `\\,` as a literal-comma escape.
-
-    Whitespace around each piece is stripped; empty pieces (e.g. trailing
-    comma) are dropped. Any other backslash is kept verbatim.
-
-    Example: `_split_escaped_csv(r"a,b,c\\,d")` -> `["a", "b", "c,d"]`
-    """
-    out: list[str] = []
-    buf: list[str] = []
-    i = 0
-    while i < len(value):
-        c = value[i]
-        if c == "\\" and i + 1 < len(value) and value[i + 1] == ",":
-            buf.append(",")
-            i += 2
-            continue
-        if c == ",":
-            piece = "".join(buf).strip()
-            if piece:
-                out.append(piece)
-            buf = []
-            i += 1
-            continue
-        buf.append(c)
-        i += 1
-    last = "".join(buf).strip()
-    if last:
-        out.append(last)
-    return out
-
-
-# Backwards-compat alias - Phase 6 tests import this name.
-_split_system_prompts = _split_escaped_csv
+# Re-export under the cli.py namespace for backward compatibility with
+# Phase 6 and Phase 8 tests that import these private aliases directly.
+_split_escaped_csv = split_escaped_csv
+_split_system_prompts = split_escaped_csv
 
 
 def _resolve_judge_models(
@@ -1295,12 +1373,19 @@ def _display_results(
     states: list[StreamState],
     judge_results: list[JudgeResult] | None = None,
     include_reasoning: bool = False,
+    hallucination_mode: bool = False,
+    hallucination_facts: list[str] | None = None,
 ) -> None:
     """Render the comparison results as a Rich table plus per-model output blocks.
 
     `judge_results` is parallel to `states` when provided; it adds a Score
     column to the table and a Reasoning line under each output block when
     `include_reasoning=True`.
+
+    When `hallucination_mode=True`, the Score column is relabeled
+    "Hallucination Risk" and each cell shows the worst-case panel risk
+    plus the score (e.g. "Low (8)"). Color: Low=green, Medium=yellow,
+    High=red.
     """
     # Only surface the SP column when there are 2+ distinct non-empty
     # system prompts. The streaming legend has already printed the full
@@ -1326,7 +1411,8 @@ def _display_results(
     table.add_column("Out", justify="right")
     table.add_column("Cost", justify="right")
     if show_score_column:
-        table.add_column("Score", style="magenta", justify="right")
+        score_header = "Hallucination Risk" if hallucination_mode else "Score"
+        table.add_column(score_header, style="magenta", justify="right")
     table.add_column("Status")
 
     total_cost = 0.0
@@ -1363,7 +1449,10 @@ def _display_results(
         ])
         if show_score_column:
             assert judge_results is not None
-            row.append(_score_cell_for_compare(judge_results[i]))
+            if hallucination_mode:
+                row.append(_risk_cell_for_compare(judge_results[i]))
+            else:
+                row.append(_score_cell_for_compare(judge_results[i]))
         row.append(status)
         table.add_row(*row)
 
@@ -1406,6 +1495,12 @@ def _display_results(
             f"[dim]Judge cost: ${j_cost:.6f} "
             f"({j_calls} judge call{'s' if j_calls != 1 else ''})[/dim]"
         )
+    if hallucination_mode and hallucination_facts:
+        console.print(
+            f"[dim]Hallucination check: "
+            f"{len(hallucination_facts)} reference fact"
+            f"{'s' if len(hallucination_facts) != 1 else ''} provided[/dim]"
+        )
     console.print(f"[dim]{pricing_freshness_note()}[/dim]")
 
 
@@ -1425,6 +1520,37 @@ def _score_cell_for_compare(jr: JudgeResult) -> str:
     if jr.average_score is not None:
         return f"{jr.average_score:.1f} ({len(successful)})"
     return "[red]N/A[/red]"
+
+
+_RISK_COLOR = {"Low": "green", "Medium": "yellow", "High": "red"}
+
+
+def _risk_cell_for_compare(jr: JudgeResult) -> str:
+    """Render the Hallucination Risk cell for one row.
+
+    Single judge: "[Low] (8)" colorized by risk level.
+    Panel: worst-case risk + score range, e.g. "[High] (3-7)".
+    No data: dim dash.
+    """
+    if not jr.judges:
+        return "[dim]-[/dim]"
+    successful = [j for j in jr.judges if j.score is not None and j.risk_level]
+    if not successful:
+        return "[red]N/A[/red]"
+
+    risk = jr.aggregated_risk_level or "?"
+    color = _RISK_COLOR.get(risk, "magenta")
+
+    if len(successful) == 1:
+        s = successful[0]
+        return f"[{color}]{s.risk_level}[/{color}] ({s.score})"
+
+    scores = sorted(j.score for j in successful if j.score is not None)
+    if scores[0] == scores[-1]:
+        score_text = str(scores[0])
+    else:
+        score_text = f"{scores[0]}-{scores[-1]}"
+    return f"[{color}]{risk}[/{color}] ({score_text}, n={len(successful)})"
 
 
 def _print_error(message: str) -> None:
