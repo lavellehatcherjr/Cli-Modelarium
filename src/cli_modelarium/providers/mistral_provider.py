@@ -27,7 +27,7 @@ from cli_modelarium.exceptions import (
 )
 from cli_modelarium.pricing import calculate_cost
 from cli_modelarium.providers._utils import extract_retry_after
-from cli_modelarium.providers.base import BaseProvider, CompletionResult
+from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
 
 
@@ -75,6 +75,8 @@ class MistralProvider(BaseProvider):
         model: str,
         temperature: float,
         system_prompt: str | None = None,
+        *,
+        on_chunk: OnChunk | None = None,
     ) -> CompletionResult:
         messages = self._build_messages(prompt, system_prompt)
 
@@ -95,6 +97,8 @@ class MistralProvider(BaseProvider):
                 if content:
                     if ttft_ms is None:
                         ttft_ms = (time.monotonic() - start) * 1000
+                    if on_chunk is not None:
+                        on_chunk(content)
                     chunks.append(content)
                 usage = _extract_chunk_usage(event)
                 if usage is not None:
