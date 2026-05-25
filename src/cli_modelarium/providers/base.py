@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 
@@ -25,6 +25,10 @@ class CompletionResult:
     provider: str = ""
     temperature: float = 0.0
     error: str | None = None
+
+
+# Type alias for the per-chunk callback that the streaming orchestrator passes in.
+OnChunk = Callable[[str], None]
 
 
 class BaseProvider(ABC):
@@ -55,15 +59,24 @@ class BaseProvider(ABC):
         model: str,
         temperature: float,
         system_prompt: str | None = None,
+        *,
+        on_chunk: OnChunk | None = None,
     ) -> CompletionResult:
         """Run a non-streaming completion.
 
         Default implementation collects chunks from `stream()` but cannot
         capture token usage. Subclasses should override to read usage data
         from the final API response.
+
+        If `on_chunk` is provided it is invoked with each text chunk before
+        the chunk is appended to the accumulator. This lets the streaming
+        orchestrator surface partial output live without changing the public
+        return type.
         """
         chunks: list[str] = []
         async for chunk in self.stream(prompt, model, temperature, system_prompt):
+            if on_chunk is not None:
+                on_chunk(chunk)
             chunks.append(chunk)
         return CompletionResult(
             output="".join(chunks),
