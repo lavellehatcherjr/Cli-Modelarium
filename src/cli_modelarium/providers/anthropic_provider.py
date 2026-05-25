@@ -28,7 +28,7 @@ from cli_modelarium.exceptions import (
 )
 from cli_modelarium.pricing import calculate_cost
 from cli_modelarium.providers._utils import extract_retry_after
-from cli_modelarium.providers.base import BaseProvider, CompletionResult
+from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
 
 DEFAULT_MAX_TOKENS = 4096
@@ -81,6 +81,8 @@ class AnthropicProvider(BaseProvider):
         model: str,
         temperature: float,
         system_prompt: str | None = None,
+        *,
+        on_chunk: OnChunk | None = None,
     ) -> CompletionResult:
         kwargs = self._build_kwargs(prompt, model, temperature, system_prompt)
 
@@ -96,6 +98,8 @@ class AnthropicProvider(BaseProvider):
                 async for text in stream.text_stream:
                     if ttft_ms is None:
                         ttft_ms = (time.monotonic() - start) * 1000
+                    if on_chunk is not None:
+                        on_chunk(text)
                     chunks.append(text)
                 final = await stream.get_final_message()
                 usage = final.usage
