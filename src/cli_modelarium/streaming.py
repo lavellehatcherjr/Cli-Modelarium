@@ -31,6 +31,7 @@ from cli_modelarium.exceptions import (
     RateLimitError,
 )
 from cli_modelarium.models_registry import get_provider_for_model
+from cli_modelarium.pricing import is_local_model
 from cli_modelarium.providers.base import BaseProvider, CompletionResult
 from cli_modelarium.security import redact_secrets
 
@@ -138,10 +139,15 @@ class StreamingDisplay:
         elif state.status == "retrying":
             status_text = f"[yellow]{state.retry_message or 'retrying'}[/yellow]"
         elif state.status == "complete":
-            ttft_text = (
-                f"TTFT {state.ttft_ms / 1000:.2f}s" if state.ttft_ms is not None else ""
-            )
-            status_text = f"[green]done[/green]  [dim]{ttft_text}[/dim]"
+            parts: list[str] = []
+            if state.ttft_ms is not None:
+                parts.append(f"TTFT {state.ttft_ms / 1000:.2f}s")
+            # Local models show "Free" - a visual distinction from $0.000000.
+            if is_local_model(state.model):
+                parts.append("Free")
+            else:
+                parts.append(f"${state.cost_usd:.6f}")
+            status_text = f"[green]done[/green]  [dim]{'  '.join(parts)}[/dim]"
         elif state.status == "error":
             status_text = "[red]error[/red]"
         else:
