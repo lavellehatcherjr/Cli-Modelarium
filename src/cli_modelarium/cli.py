@@ -20,6 +20,7 @@ from cli_modelarium.exceptions import (
     UnknownModelError,
     UnknownProviderError,
 )
+from cli_modelarium.io_safety import load_system_prompt
 from cli_modelarium.models_registry import (
     all_known_providers,
     list_models_for_provider,
@@ -112,8 +113,15 @@ def main(ctx: click.Context) -> None:
 @click.option("--models", required=True, help="Comma-separated model IDs or group names.")
 @click.option("--temperatures", default="0.0", help="Comma-separated temperatures (default: 0.0).")
 @click.option("--system-prompt", help="System prompt applied to every model.")
-@click.option("--system-prompts", help="Comma-separated system prompts to compare (Phase 6).")
-@click.option("--system-prompt-file", type=click.Path(), help="Load system prompt from file (Phase 6).")
+@click.option(
+    "--system-prompts",
+    help="Comma-separated system prompts; the comparison fans out across them. Use \\, for a literal comma.",
+)
+@click.option(
+    "--system-prompt-file",
+    type=click.Path(),
+    help="Load a single system prompt from a UTF-8 file (max 1 MB).",
+)
 @click.option("--judge", help="Score outputs using this model as judge (Phase 8).")
 @click.option("--judges", help="Comma-separated panel of judges (Phase 8).")
 @click.option("--judge-criteria", help="Comma-separated custom scoring criteria (Phase 8).")
@@ -165,7 +173,14 @@ def compare(
         if not model_list:
             raise click.UsageError("--models must include at least one model ID or group.")
         temp_list = _parse_temperatures(temperatures)
-    except (UnknownModelError, ValueError) as e:
+        system_prompt_list = _resolve_system_prompts(
+            system_prompt=system_prompt,
+            system_prompts=system_prompts,
+            system_prompt_file=system_prompt_file,
+        )
+    except click.UsageError:
+        raise
+    except (UnknownModelError, FileNotFoundError, ValueError) as e:
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
 
@@ -178,7 +193,7 @@ def compare(
                 prompt=prompt,
                 models=model_list,
                 temperatures=temp_list,
-                system_prompt=system_prompt,
+                system_prompts=system_prompt_list,
                 provider_factory=provider_factory,
                 console=console,
                 concurrency=concurrency,
@@ -615,6 +630,82 @@ def _parse_temperatures(raw: str) -> list[float]:
     return out or [0.0]
 
 
+def _resolve_system_prompts(
+    *,
+    system_prompt: str | None,
+    system_prompts: str | None,
+    system_prompt_file: str | None,
+) -> list[str | None]:
+    """Resolve the three mutually-exclusive system-prompt flags into a list.
+
+    Returns `[None]` when no system prompt is configured (the orchestrator
+    treats this as "one task with no system prompt"). Returns a list of
+    strings otherwise - never an empty list.
+
+    Raises:
+        click.UsageError: if more than one of the three flags is set.
+        FileNotFoundError / ValueError: from `load_system_prompt`.
+    """
+    used = [
+        name
+        for name, val in (
+            ("--system-prompt", system_prompt),
+            ("--system-prompts", system_prompts),
+            ("--system-prompt-file", system_prompt_file),
+        )
+        if val
+    ]
+    if len(used) > 1:
+        raise click.UsageError(
+            f"{', '.join(used)} are mutually exclusive - pick one."
+        )
+
+    if system_prompt_file:
+        return [load_system_prompt(system_prompt_file)]
+    if system_prompts:
+        parsed = _split_system_prompts(system_prompts)
+        return parsed or [None]
+    if system_prompt:
+        # Empty-string case is also caught here; we'd have failed the `if`
+        # above. But guard anyway: a stripped-empty value means no prompt.
+        stripped = system_prompt.strip()
+        return [stripped] if stripped else [None]
+    return [None]
+
+
+def _split_system_prompts(value: str) -> list[str]:
+    """Split a comma-separated string of system prompts.
+
+    `\\,` is interpreted as a literal comma. Any other backslash is a
+    literal backslash. Whitespace around each prompt is stripped; empty
+    pieces (e.g. trailing comma) are dropped.
+
+    Example: `_split_system_prompts(r"a,b,c\\,d")` -> `["a", "b", "c,d"]`
+    """
+    out: list[str] = []
+    buf: list[str] = []
+    i = 0
+    while i < len(value):
+        c = value[i]
+        if c == "\\" and i + 1 < len(value) and value[i + 1] == ",":
+            buf.append(",")
+            i += 2
+            continue
+        if c == ",":
+            piece = "".join(buf).strip()
+            if piece:
+                out.append(piece)
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    last = "".join(buf).strip()
+    if last:
+        out.append(last)
+    return out
+
+
 def _get_provider_instance(
     provider_name: str, *, local_url: str | None = None
 ) -> BaseProvider:
@@ -653,12 +744,22 @@ def _get_provider_instance(
 
 def _display_results(states: list[StreamState]) -> None:
     """Render the comparison results as a Rich table plus per-model output blocks."""
+    # Only surface the SP column when there are 2+ distinct non-empty
+    # system prompts. The streaming legend has already printed the full
+    # mapping; we just need the index here.
+    from cli_modelarium.streaming import prompt_index_map
+
+    prompt_indices = prompt_index_map(states)
+    show_sp_column = bool(prompt_indices)
+
     table = Table(
         title=f"Comparing {len(states)} completion{'s' if len(states) != 1 else ''}",
         border_style="dim",
         title_justify="left",
     )
     table.add_column("Model", style="bold")
+    if show_sp_column:
+        table.add_column("SP", style="magenta", justify="right")
     table.add_column("Temp", justify="right")
     table.add_column("TTFT", justify="right", style="dim")
     table.add_column("Latency", justify="right", style="dim")
@@ -685,8 +786,13 @@ def _display_results(states: list[StreamState]) -> None:
             in_text = str(s.input_tokens)
             out_text = str(s.output_tokens)
 
-        table.add_row(
-            s.model,
+        row: list[str] = [s.model]
+        if show_sp_column:
+            if s.system_prompt and s.system_prompt in prompt_indices:
+                row.append(f"SP {prompt_indices[s.system_prompt]}")
+            else:
+                row.append("[dim]-[/dim]")
+        row.extend([
             f"{s.temperature:.1f}",
             ttft_text,
             latency_text,
@@ -694,14 +800,18 @@ def _display_results(states: list[StreamState]) -> None:
             out_text,
             cost_text,
             status,
-        )
+        ])
+        table.add_row(*row)
 
     console.print(table)
     console.print()
 
-    # Per-model output blocks
+    # Per-model output blocks. When multiple SPs are in play, identify which
+    # one produced each block so the reader can cross-reference the legend.
     for s in states:
         header = f"[bold cyan]>[/bold cyan] [bold]{s.model}[/bold] @ {s.temperature:.1f}"
+        if show_sp_column and s.system_prompt and s.system_prompt in prompt_indices:
+            header += f"  [magenta]SP {prompt_indices[s.system_prompt]}[/magenta]"
         console.print(header)
         if s.error:
             console.print(f"  [red]{s.error}[/red]")
