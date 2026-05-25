@@ -79,5 +79,9 @@ class OutputFormatError(ModelariumError):
     """Raised when the output format cannot be inferred or is unsupported."""
 
 
+class AssertionConfigError(BatchValidationError):
+    """Raised when an assertion config is malformed (unknown type, missing value)."""
+
+
 class LocalURLError(ConfigurationError):
     """Raised when a local provider URL fails the localhost-only safety check."""
