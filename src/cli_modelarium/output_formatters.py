@@ -57,6 +57,7 @@ CSV_COLUMNS: tuple[str, ...] = (
     "judge_score_avg",
     "judge_score_std",
     "judge_count",
+    "hallucination_risk",
     "assertions_passed",
     "assertions_total",
     "assertions_failed_types",
@@ -143,6 +144,17 @@ def _judge_count(r: BatchResult) -> int:
     return sum(1 for j in r.judge_result.judges if j.score is not None)
 
 
+def _hallucination_risk_cell(r: BatchResult) -> str:
+    """Render the hallucination_risk column for tabular output. Empty when not in
+    hallucination mode (i.e., no judge had a risk_level).
+    """
+    if r.judge_result is None:
+        return ""
+    if r.judge_result.aggregated_risk_level is None:
+        return ""
+    return r.judge_result.aggregated_risk_level
+
+
 def _assertion_passed_cell(r: BatchResult) -> Any:
     """Render assertions_passed for tabular output. Empty when assertions not run."""
     if r.assertion_results is None:
@@ -200,6 +212,7 @@ def _format_csv(results: list[BatchResult]) -> str:
                 "judge_score_avg": _judge_cell_avg(r),
                 "judge_score_std": _judge_cell_std(r),
                 "judge_count": _judge_count(r),
+                "hallucination_risk": _hallucination_risk_cell(r),
                 "assertions_passed": _assertion_passed_cell(r),
                 "assertions_total": _assertion_total_cell(r),
                 "assertions_failed_types": _assertion_failed_types_cell(r),
@@ -306,12 +319,17 @@ def _result_to_dict(r: BatchResult) -> dict[str, Any]:
                 "cost_usd": j.cost_usd,
                 "latency_ms": j.latency_ms,
                 "parse_error": j.parse_error,
+                # Always include risk_level; will be None for non-hallucination
+                # judging which keeps the schema predictable for downstream tools.
+                "risk_level": j.risk_level,
             }
             for j in r.judge_result.judges
         ]
         out["judge_score_avg"] = r.judge_result.average_score
         out["judge_score_std"] = r.judge_result.std_dev
         out["judge_skipped"] = list(r.judge_result.skipped_models)
+        if r.judge_result.aggregated_risk_level is not None:
+            out["hallucination_risk"] = r.judge_result.aggregated_risk_level
     if r.assertion_results is not None:
         # Replace the raw config carryover with the executed results.
         passed, total = count_passed(r.assertion_results)
@@ -352,6 +370,13 @@ def _format_markdown(results: list[BatchResult]) -> str:
     failures = sum(1 for r in results if r.error)
     has_judges = any(r.judge_result is not None for r in results)
     has_assertions = any(r.assertion_results is not None for r in results)
+    # Detect hallucination mode from the data: any judge has a risk_level
+    # set, which means parse_hallucination_response was used.
+    has_hallucination = any(
+        r.judge_result is not None
+        and any(j.risk_level for j in r.judge_result.judges)
+        for r in results
+    )
     judge_cost = sum(
         j.cost_usd
         for r in results
@@ -404,7 +429,7 @@ def _format_markdown(results: list[BatchResult]) -> str:
         header_cols = ["Model", "Temp", "TTFT (ms)", "Latency (ms)", "In", "Out", "Cost"]
         align_cols = ["-------", "-----:", "----------:", "-------------:", "---:", "----:", "-----:"]
         if has_judges:
-            header_cols.append("Score")
+            header_cols.append("Hallucination Risk" if has_hallucination else "Score")
             align_cols.append(":------")
         if has_assertions:
             header_cols.append("Assertions")
@@ -429,7 +454,10 @@ def _format_markdown(results: list[BatchResult]) -> str:
                 cost,
             ]
             if has_judges:
-                cells.append(_judge_summary_cell(r))
+                if has_hallucination:
+                    cells.append(_hallucination_summary_cell(r))
+                else:
+                    cells.append(_judge_summary_cell(r))
             if has_assertions:
                 cells.append(_assertion_summary_cell(r))
             cells.append(status)
@@ -506,6 +534,35 @@ def _assertion_failure_lines(r: BatchResult) -> list[str]:
     for a in interesting:
         out.append(f"- {format_assertion_message(a)}")
     return out
+
+
+def _hallucination_summary_cell(r: BatchResult) -> str:
+    """Render the markdown Hallucination Risk cell.
+
+    Single judge: "Low (8)".
+    Panel: "High [gpt-5.5: High (3), claude: Medium (5)]".
+    No data: "-".
+    """
+    if r.judge_result is None or not r.judge_result.judges:
+        return "-"
+    successful = [
+        j for j in r.judge_result.judges
+        if j.score is not None and j.risk_level
+    ]
+    if not successful:
+        return "N/A"
+
+    risk = r.judge_result.aggregated_risk_level or "?"
+
+    if len(successful) == 1 and len(r.judge_result.judges) == 1:
+        s = successful[0]
+        return f"{s.risk_level} ({s.score})"
+
+    breakdown = ", ".join(
+        f"{j.model.split('/')[-1]}: {j.risk_level or '?'} ({j.score if j.score is not None else 'X'})"
+        for j in r.judge_result.judges
+    )
+    return f"{risk} [{breakdown}]"
 
 
 def _judge_summary_cell(r: BatchResult) -> str:
