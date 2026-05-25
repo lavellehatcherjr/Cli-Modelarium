@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
+from rich.table import Table
 
 from cli_modelarium.exceptions import (
     ModelariumError,
@@ -70,6 +71,7 @@ class StreamState:
     model: str
     provider_name: str
     temperature: float
+    system_prompt: str | None = None
     status: Status = "pending"
     text: str = ""
     ttft_ms: float | None = None
@@ -116,17 +118,55 @@ class StreamState:
         self.retry_message = f"{reason}, retry in {delay_s:.1f}s (attempt {attempt + 1})"
 
 
+def prompt_index_map(states: list[StreamState]) -> dict[str, int]:
+    """Build an order-preserving map of distinct system prompts to 1-based indices.
+
+    Empty/None system prompts are not assigned indices. Returned map is
+    empty if zero or one distinct non-empty system prompts are in play -
+    that signals "don't bother showing per-row prompt identifiers".
+    """
+    seen: dict[str, int] = {}
+    for s in states:
+        if s.system_prompt and s.system_prompt not in seen:
+            seen[s.system_prompt] = len(seen) + 1
+    return seen if len(seen) > 1 else {}
+
+
+def render_prompt_legend(states: list[StreamState]) -> Table | None:
+    """Build a Rich Table mapping `SP N` indices to truncated prompt previews.
+
+    Returns None if there's nothing to legend (single or zero prompts).
+    """
+    indices = prompt_index_map(states)
+    if not indices:
+        return None
+    table = Table(
+        title="System prompts in use",
+        border_style="dim",
+        title_justify="left",
+        show_header=False,
+    )
+    table.add_column("Index", style="bold magenta")
+    table.add_column("Preview")
+    for prompt, idx in indices.items():
+        preview = prompt if len(prompt) <= 60 else prompt[:57] + "..."
+        # Replace newlines so a multiline system prompt stays on one row.
+        preview = preview.replace("\n", " / ")
+        table.add_row(f"SP {idx}", preview)
+    return table
+
+
 class StreamingDisplay:
     """Rich renderable. `__rich__` is re-evaluated on every Live refresh."""
 
     def __init__(self, states: list[StreamState]) -> None:
         self.states = states
+        self._prompt_indices = prompt_index_map(states)
 
     def __rich__(self) -> Group:
         return Group(*[self._panel(s) for s in self.states])
 
-    @staticmethod
-    def _panel(state: StreamState) -> Panel:
+    def _panel(self, state: StreamState) -> Panel:
         if state.status == "pending":
             status_text = "[dim]queued[/dim]"
         elif state.status == "waiting":
@@ -153,7 +193,19 @@ class StreamingDisplay:
         else:
             status_text = state.status
 
-        title = f"[bold]{state.model}[/bold] @ {state.temperature:.1f}   {status_text}"
+        # When multiple distinct system prompts are in play, identify which
+        # one this panel is for. We use the index (cheap, deterministic) and
+        # put the full text in a one-time legend above the Live block.
+        sp_marker = ""
+        if state.system_prompt and self._prompt_indices:
+            idx = self._prompt_indices.get(state.system_prompt)
+            if idx is not None:
+                sp_marker = f"  [magenta]SP {idx}[/magenta]"
+
+        title = (
+            f"[bold]{state.model}[/bold] @ {state.temperature:.1f}"
+            f"{sp_marker}   {status_text}"
+        )
 
         if state.error:
             body = f"[red]{state.error}[/red]"
@@ -178,17 +230,21 @@ async def _call_with_retry(
     provider: BaseProvider,
     state: StreamState,
     prompt: str,
-    system_prompt: str | None,
     max_retries: int,
     sleep: Callable[[float], "asyncio.Future[None]"] = asyncio.sleep,
 ) -> CompletionResult:
     """Run `provider.complete()` with 429/529 retry, updating state.
 
+    `state.system_prompt` is forwarded to the provider on every attempt.
     `sleep` is parameterised so tests can monkeypatch it to make backoff
     instantaneous.
     """
     rate_limit_delay = RATE_LIMIT_BASE_DELAY_SECONDS
     overloaded_delay = OVERLOADED_BASE_DELAY_SECONDS
+
+    # Treat empty system prompts as "no system prompt at all" per the
+    # build prompt's Phase 6 contract.
+    effective_system_prompt = state.system_prompt or None
 
     for attempt in range(max_retries + 1):
         try:
@@ -196,7 +252,7 @@ async def _call_with_retry(
                 prompt=prompt,
                 model=state.model,
                 temperature=state.temperature,
-                system_prompt=system_prompt,
+                system_prompt=effective_system_prompt,
                 on_chunk=state.append_text,
             )
         except RateLimitError as e:
@@ -227,7 +283,6 @@ async def _run_one(
     provider: BaseProvider,
     state: StreamState,
     prompt: str,
-    system_prompt: str | None,
     semaphore: asyncio.Semaphore,
     max_retries: int,
     sleep: Callable[[float], "asyncio.Future[None]"] = asyncio.sleep,
@@ -240,7 +295,6 @@ async def _run_one(
                 provider=provider,
                 state=state,
                 prompt=prompt,
-                system_prompt=system_prompt,
                 max_retries=max_retries,
                 sleep=sleep,
             )
@@ -256,7 +310,7 @@ async def run_streaming_comparison(
     prompt: str,
     models: list[str],
     temperatures: list[float],
-    system_prompt: str | None,
+    system_prompts: list[str | None],
     provider_factory: Callable[[str], BaseProvider],
     console: Console | None = None,
     concurrency: int = DEFAULT_CONCURRENCY,
@@ -264,14 +318,20 @@ async def run_streaming_comparison(
     live_display: bool = True,
     sleep: Callable[[float], "asyncio.Future[None]"] = asyncio.sleep,
 ) -> list[StreamState]:
-    """Run every (model x temperature) call in parallel.
+    """Run every (system_prompt x model x temperature) call in parallel.
+
+    `system_prompts` is always a list. Pass `[None]` for "no system prompt".
+    Pass multiple entries to run a matrix comparison (one task per
+    combination of system_prompt, model, and temperature).
 
     Returns the list of `StreamState` in the same order as the cartesian
-    product: for each model in order, all temperatures in order.
+    product: outer loop over system prompts, then models, then temperatures.
 
     With `live_display=True` (the default) wraps the work in a Rich `Live`
     using `transient=True`, so the streaming panels disappear when the call
-    completes and the caller can render a clean final summary.
+    completes and the caller can render a clean final summary. A legend
+    mapping `SP N` to prompt previews is printed once before the Live
+    block when multiple distinct prompts are in play.
 
     `provider_factory(name)` is called once per unique provider name to
     obtain the SDK client instance. Reused across all calls for that
@@ -279,16 +339,24 @@ async def run_streaming_comparison(
     """
     if console is None:
         console = Console()
+    if not system_prompts:
+        # Defensive: callers should pass [None] explicitly, but treat
+        # missing/empty as "one task with no system prompt".
+        system_prompts = [None]
 
     states: list[StreamState] = []
-    for model in models:
-        provider_name = get_provider_for_model(model)
-        for temperature in temperatures:
-            states.append(
-                StreamState(
-                    model=model, provider_name=provider_name, temperature=temperature
+    for sp in system_prompts:
+        for model in models:
+            provider_name = get_provider_for_model(model)
+            for temperature in temperatures:
+                states.append(
+                    StreamState(
+                        model=model,
+                        provider_name=provider_name,
+                        temperature=temperature,
+                        system_prompt=sp,
+                    )
                 )
-            )
 
     # One instance per provider, one semaphore per provider.
     provider_names = sorted({s.provider_name for s in states})
@@ -305,7 +373,6 @@ async def run_streaming_comparison(
                 provider=instances[s.provider_name],
                 state=s,
                 prompt=prompt,
-                system_prompt=system_prompt,
                 semaphore=semaphores[s.provider_name],
                 max_retries=max_retries,
                 sleep=sleep,
@@ -313,6 +380,13 @@ async def run_streaming_comparison(
             for s in states
         ]
     )
+
+    # The legend (if any) is printed OUTSIDE the Live block so it survives
+    # the transient=True cleanup and is still on screen alongside the
+    # caller's final summary table.
+    legend = render_prompt_legend(states)
+    if legend is not None:
+        console.print(legend)
 
     if live_display:
         display = StreamingDisplay(states)
