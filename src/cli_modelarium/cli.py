@@ -36,6 +36,15 @@ from cli_modelarium.exceptions import (
     UnknownProviderError,
 )
 from cli_modelarium.io_safety import load_system_prompt
+from cli_modelarium.judging import (
+    DEFAULT_CRITERIA,
+    JUDGE_PROMPT_TEMPLATE,
+    JudgeResult,
+    print_tos_disclosure,
+    run_judging,
+    total_judge_calls,
+    total_judge_cost,
+)
 from cli_modelarium.output_formatters import (
     render_markdown_to_console,
     state_to_result,
@@ -144,11 +153,28 @@ def main(ctx: click.Context) -> None:
     type=click.Path(),
     help="Load a single system prompt from a UTF-8 file (max 1 MB).",
 )
-@click.option("--judge", help="Score outputs using this model as judge (Phase 8).")
-@click.option("--judges", help="Comma-separated panel of judges (Phase 8).")
-@click.option("--judge-criteria", help="Comma-separated custom scoring criteria (Phase 8).")
-@click.option("--judge-template", type=click.Path(), help="Custom judge prompt template (Phase 8).")
-@click.option("--include-reasoning", is_flag=True, help="Include judge reasoning in output (Phase 8).")
+@click.option("--judge", help="Score outputs using this model as judge.")
+@click.option(
+    "--judges",
+    help="Comma-separated panel of judges (scores averaged). Use \\, for a literal comma.",
+)
+@click.option(
+    "--judge-criteria",
+    help="Comma-separated custom scoring criteria. Use \\, for a literal comma.",
+)
+@click.option(
+    "--judge-template",
+    type=click.Path(),
+    help="Load a custom judge prompt template from a UTF-8 file (max 1 MB).",
+)
+@click.option(
+    "--include-reasoning", is_flag=True, help="Show each judge's reasoning in the output."
+)
+@click.option(
+    "--no-judge-tos",
+    is_flag=True,
+    help="Suppress the judge-use ToS reminder (for CI/CD where it's been acknowledged).",
+)
 @click.option("--check-hallucination", is_flag=True, help="Apply hallucination preset (Phase 10).")
 @click.option("--expected-facts", help="Comma-separated reference facts (Phase 10).")
 @click.option("--expected-facts-file", type=click.Path(), help="Load expected facts from file (Phase 10).")
@@ -179,6 +205,7 @@ def compare(
     judge_criteria: str | None,
     judge_template: str | None,
     include_reasoning: bool,
+    no_judge_tos: bool,
     check_hallucination: bool,
     expected_facts: str | None,
     expected_facts_file: str | None,
@@ -200,28 +227,55 @@ def compare(
             system_prompts=system_prompts,
             system_prompt_file=system_prompt_file,
         )
+        judge_models = _resolve_judge_models(judge=judge, judges=judges)
+        judge_criteria_list, judge_template_text = _resolve_judge_criteria_and_template(
+            judge_criteria=judge_criteria,
+            judge_template=judge_template,
+        )
+        # Validate judge models BEFORE the main comparison runs - misconfigured
+        # judges should not fail late after burning money on the comparison.
+        if judge_models:
+            _validate_judge_models(judge_models, local_url=local_url)
     except click.UsageError:
         raise
-    except (UnknownModelError, FileNotFoundError, ValueError) as e:
+    except (UnknownModelError, KeyNotConfiguredError, FileNotFoundError, ValueError) as e:
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
+
+    if judge_models and not no_judge_tos:
+        print_tos_disclosure(console)
 
     def provider_factory(name: str) -> BaseProvider:
         return _get_provider_instance(name, local_url=local_url)
 
-    try:
-        states = asyncio.run(
-            run_streaming_comparison(
-                prompt=prompt,
-                models=model_list,
-                temperatures=temp_list,
-                system_prompts=system_prompt_list,
-                provider_factory=provider_factory,
-                console=console,
-                concurrency=concurrency,
-                live_display=not no_stream,
-            )
+    async def _run_all() -> tuple[list[StreamState], list[JudgeResult] | None]:
+        states = await run_streaming_comparison(
+            prompt=prompt,
+            models=model_list,
+            temperatures=temp_list,
+            system_prompts=system_prompt_list,
+            provider_factory=provider_factory,
+            console=console,
+            concurrency=concurrency,
+            live_display=not no_stream,
         )
+        jrs: list[JudgeResult] | None = None
+        if judge_models:
+            jrs = await run_judging(
+                items=[(s, prompt) for s in states],
+                judge_models=judge_models,
+                criteria=judge_criteria_list,
+                provider_factory=provider_factory,
+                template=judge_template_text,
+                skip_self_eval=True,
+                concurrency=concurrency,
+            )
+        return states, jrs
+
+    try:
+        # Single asyncio.run keeps all httpx client cleanup on one event loop,
+        # so we don't get "Event loop is closed" warnings on shutdown.
+        states, judge_results = asyncio.run(_run_all())
     except KeyNotConfiguredError as e:
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
@@ -229,7 +283,7 @@ def compare(
         _print_error(redact_secrets(str(e)))
         sys.exit(EXIT_CALL_FAILED)
 
-    _display_results(states)
+    _display_results(states, judge_results=judge_results, include_reasoning=include_reasoning)
 
     if any(s.error for s in states):
         sys.exit(EXIT_CALL_FAILED)
@@ -253,11 +307,28 @@ def compare(
     type=click.Path(),
     help="Load a single system prompt from a UTF-8 file (max 1 MB).",
 )
-@click.option("--judge", help="Score outputs using this model as judge (Phase 8).")
-@click.option("--judges", help="Comma-separated panel of judges (Phase 8).")
-@click.option("--judge-criteria", help="Comma-separated custom scoring criteria (Phase 8).")
-@click.option("--judge-template", type=click.Path(), help="Custom judge prompt template (Phase 8).")
-@click.option("--include-reasoning", is_flag=True, help="Include judge reasoning in output (Phase 8).")
+@click.option("--judge", help="Score outputs using this model as judge.")
+@click.option(
+    "--judges",
+    help="Comma-separated panel of judges (scores averaged). Use \\, for a literal comma.",
+)
+@click.option(
+    "--judge-criteria",
+    help="Comma-separated custom scoring criteria. Use \\, for a literal comma.",
+)
+@click.option(
+    "--judge-template",
+    type=click.Path(),
+    help="Load a custom judge prompt template from a UTF-8 file (max 1 MB).",
+)
+@click.option(
+    "--include-reasoning", is_flag=True, help="Show each judge's reasoning in the output."
+)
+@click.option(
+    "--no-judge-tos",
+    is_flag=True,
+    help="Suppress the judge-use ToS reminder (for CI/CD where it's been acknowledged).",
+)
 @click.option("--check-hallucination", is_flag=True, help="Apply the hallucination detection preset (Phase 10).")
 @click.option("--expected-facts", help="Comma-separated reference facts (Phase 10).")
 @click.option("--expected-facts-file", type=click.Path(), help="Load expected facts from a file (Phase 10).")
@@ -292,6 +363,7 @@ def batch(
     judge_criteria: str | None,
     judge_template: str | None,
     include_reasoning: bool,
+    no_judge_tos: bool,
     check_hallucination: bool,
     expected_facts: str | None,
     expected_facts_file: str | None,
@@ -336,11 +408,21 @@ def batch(
             system_prompts=system_prompts,
             system_prompt_file=system_prompt_file,
         )
+        judge_models = _resolve_judge_models(judge=judge, judges=judges)
+        judge_criteria_list, judge_template_text = _resolve_judge_criteria_and_template(
+            judge_criteria=judge_criteria,
+            judge_template=judge_template,
+        )
+        # Validate judge models BEFORE the batch starts - misconfigured
+        # judges should not fail late after burning batch money.
+        if judge_models and not no_judge:
+            _validate_judge_models(judge_models, local_url=local_url)
     except click.UsageError:
         raise
     except (
         BatchValidationError,
         UnknownModelError,
+        KeyNotConfiguredError,
         FileNotFoundError,
         ValueError,
     ) as e:
@@ -397,16 +479,32 @@ def batch(
         f"{len(temp_list)} temperature{'s' if len(temp_list) != 1 else ''})[/dim]"
     )
 
-    try:
-        asyncio.run(
-            run_batch(
-                pairs=pairs,
-                provider_factory=provider_factory,
-                console=console,
-                concurrency=concurrency,
-                show_progress=True,
-            )
+    if judge_models and not no_judge and not no_judge_tos:
+        print_tos_disclosure(console)
+
+    async def _run_batch_and_judge() -> list[JudgeResult] | None:
+        await run_batch(
+            pairs=pairs,
+            provider_factory=provider_factory,
+            console=console,
+            concurrency=concurrency,
+            show_progress=True,
         )
+        if judge_models and not no_judge:
+            return await run_judging(
+                items=[(s, bp.prompt) for s, bp in pairs],
+                judge_models=judge_models,
+                criteria=judge_criteria_list,
+                provider_factory=provider_factory,
+                template=judge_template_text,
+                skip_self_eval=True,
+                concurrency=concurrency,
+            )
+        return None
+
+    try:
+        # Single asyncio.run keeps all httpx client cleanup on one event loop.
+        judge_results = asyncio.run(_run_batch_and_judge())
     except KeyNotConfiguredError as e:
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
@@ -415,17 +513,27 @@ def batch(
         sys.exit(EXIT_CALL_FAILED)
 
     # Convert StreamStates to BatchResults and emit.
-    results = [state_to_result(s, bp) for s, bp in pairs]
+    results = []
+    for i, (state, bp) in enumerate(pairs):
+        jr = judge_results[i] if judge_results is not None else None
+        results.append(state_to_result(state, bp, judge_result=jr))
     _emit_batch_results(results, output_path=output_path, output_fmt=output_fmt)
 
     failed = sum(1 for r in results if r.error)
     success = len(results) - failed
     total_cost = sum(r.cost_usd for r in results if r.error is None)
-    console.print(
-        f"[green]{success} succeeded[/green], "
-        f"[red]{failed} failed[/red]  "
-        f"[dim]total cost ${total_cost:.6f}[/dim]"
-    )
+    summary_parts = [
+        f"[green]{success} succeeded[/green]",
+        f"[red]{failed} failed[/red]",
+        f"[dim]total cost ${total_cost:.6f}[/dim]",
+    ]
+    if judge_results is not None:
+        j_cost = total_judge_cost(judge_results)
+        j_calls = total_judge_calls(judge_results)
+        summary_parts.append(
+            f"[dim]judge cost ${j_cost:.6f} ({j_calls} call{'s' if j_calls != 1 else ''})[/dim]"
+        )
+    console.print("  ".join(summary_parts))
 
     # Phase 9 will use EXIT_ASSERTION_FAILED. For now, call failures exit 2.
     if failed > 0:
@@ -941,14 +1049,13 @@ def _resolve_system_prompts(
     return [None]
 
 
-def _split_system_prompts(value: str) -> list[str]:
-    """Split a comma-separated string of system prompts.
+def _split_escaped_csv(value: str) -> list[str]:
+    """Split a comma-separated string with `\\,` as a literal-comma escape.
 
-    `\\,` is interpreted as a literal comma. Any other backslash is a
-    literal backslash. Whitespace around each prompt is stripped; empty
-    pieces (e.g. trailing comma) are dropped.
+    Whitespace around each piece is stripped; empty pieces (e.g. trailing
+    comma) are dropped. Any other backslash is kept verbatim.
 
-    Example: `_split_system_prompts(r"a,b,c\\,d")` -> `["a", "b", "c,d"]`
+    Example: `_split_escaped_csv(r"a,b,c\\,d")` -> `["a", "b", "c,d"]`
     """
     out: list[str] = []
     buf: list[str] = []
@@ -972,6 +1079,81 @@ def _split_system_prompts(value: str) -> list[str]:
     if last:
         out.append(last)
     return out
+
+
+# Backwards-compat alias - Phase 6 tests import this name.
+_split_system_prompts = _split_escaped_csv
+
+
+def _resolve_judge_models(
+    *, judge: str | None, judges: str | None
+) -> list[str]:
+    """Resolve --judge / --judges into a list of judge model IDs.
+
+    Returns [] when neither flag is set. Raises click.UsageError if both
+    flags are set simultaneously (they're mutually exclusive).
+    """
+    if judge and judges:
+        raise click.UsageError(
+            "--judge and --judges are mutually exclusive - pick one."
+        )
+    if judges:
+        return _split_escaped_csv(judges)
+    if judge and judge.strip():
+        return [judge.strip()]
+    return []
+
+
+def _resolve_judge_criteria_and_template(
+    *,
+    judge_criteria: str | None,
+    judge_template: str | None,
+) -> tuple[list[str], str]:
+    """Resolve --judge-criteria and --judge-template into (criteria, template).
+
+    Returns (DEFAULT_CRITERIA, JUDGE_PROMPT_TEMPLATE) when neither is set.
+    Raises click.UsageError if both are set simultaneously.
+
+    --judge-template loads a custom prompt template from disk (UTF-8, max 1 MB).
+    --judge-criteria splits on commas with the same `\\,` escape as system prompts.
+    """
+    if judge_criteria and judge_template:
+        raise click.UsageError(
+            "--judge-criteria and --judge-template are mutually exclusive - pick one."
+        )
+    criteria = list(DEFAULT_CRITERIA)
+    template = JUDGE_PROMPT_TEMPLATE
+    if judge_criteria:
+        criteria = _split_escaped_csv(judge_criteria) or list(DEFAULT_CRITERIA)
+    if judge_template:
+        # Reuse the system-prompt-file loader: same size + encoding contract.
+        template = load_system_prompt(judge_template)
+    return criteria, template
+
+
+def _validate_judge_models(
+    judge_models: list[str], *, local_url: str | None
+) -> None:
+    """Ensure every judge model is in the registry AND has a configured key.
+
+    This runs BEFORE any main API calls - the build prompt's contract is
+    that a misconfigured judge fails the run immediately, not after burning
+    money on the comparison.
+    """
+    from cli_modelarium.models_registry import get_provider_for_model
+    from cli_modelarium.security import is_key_configured
+
+    seen_providers: set[str] = set()
+    for model in judge_models:
+        provider_name = get_provider_for_model(model)  # raises UnknownModelError
+        if provider_name in seen_providers:
+            continue
+        seen_providers.add(provider_name)
+        if provider_name == "local":
+            # Local needs no key; the URL check happens at construction time.
+            continue
+        if not is_key_configured(provider_name):
+            raise KeyNotConfiguredError(provider_name)
 
 
 def _get_provider_instance(
@@ -1010,8 +1192,17 @@ def _get_provider_instance(
     return provider_cls(api_key=api_key)
 
 
-def _display_results(states: list[StreamState]) -> None:
-    """Render the comparison results as a Rich table plus per-model output blocks."""
+def _display_results(
+    states: list[StreamState],
+    judge_results: list[JudgeResult] | None = None,
+    include_reasoning: bool = False,
+) -> None:
+    """Render the comparison results as a Rich table plus per-model output blocks.
+
+    `judge_results` is parallel to `states` when provided; it adds a Score
+    column to the table and a Reasoning line under each output block when
+    `include_reasoning=True`.
+    """
     # Only surface the SP column when there are 2+ distinct non-empty
     # system prompts. The streaming legend has already printed the full
     # mapping; we just need the index here.
@@ -1019,6 +1210,7 @@ def _display_results(states: list[StreamState]) -> None:
 
     prompt_indices = prompt_index_map(states)
     show_sp_column = bool(prompt_indices)
+    show_score_column = judge_results is not None
 
     table = Table(
         title=f"Comparing {len(states)} completion{'s' if len(states) != 1 else ''}",
@@ -1034,10 +1226,12 @@ def _display_results(states: list[StreamState]) -> None:
     table.add_column("In", justify="right")
     table.add_column("Out", justify="right")
     table.add_column("Cost", justify="right")
+    if show_score_column:
+        table.add_column("Score", style="magenta", justify="right")
     table.add_column("Status")
 
     total_cost = 0.0
-    for s in states:
+    for i, s in enumerate(states):
         if s.error:
             status = "[red]error[/red]"
             cost_text = "[dim]-[/dim]"
@@ -1067,8 +1261,11 @@ def _display_results(states: list[StreamState]) -> None:
             in_text,
             out_text,
             cost_text,
-            status,
         ])
+        if show_score_column:
+            assert judge_results is not None
+            row.append(_score_cell_for_compare(judge_results[i]))
+        row.append(status)
         table.add_row(*row)
 
     console.print(table)
@@ -1076,7 +1273,7 @@ def _display_results(states: list[StreamState]) -> None:
 
     # Per-model output blocks. When multiple SPs are in play, identify which
     # one produced each block so the reader can cross-reference the legend.
-    for s in states:
+    for i, s in enumerate(states):
         header = f"[bold cyan]>[/bold cyan] [bold]{s.model}[/bold] @ {s.temperature:.1f}"
         if show_sp_column and s.system_prompt and s.system_prompt in prompt_indices:
             header += f"  [magenta]SP {prompt_indices[s.system_prompt]}[/magenta]"
@@ -1086,10 +1283,49 @@ def _display_results(states: list[StreamState]) -> None:
         else:
             for line in s.text.splitlines() or [""]:
                 console.print(f"  {line}")
+        # Optional judge reasoning lines.
+        if include_reasoning and judge_results is not None:
+            for j in judge_results[i].judges:
+                score_str = j.score if j.score is not None else "?"
+                if j.parse_error:
+                    console.print(
+                        f"  [magenta dim]judge {j.model}: parse error - "
+                        f"{j.parse_error}[/magenta dim]"
+                    )
+                else:
+                    console.print(
+                        f"  [magenta dim]judge {j.model} ({score_str}/10): "
+                        f"{j.reasoning}[/magenta dim]"
+                    )
         console.print()
 
     console.print(f"[dim]Total cost: ${total_cost:.6f}[/dim]")
+    if judge_results is not None:
+        j_cost = total_judge_cost(judge_results)
+        j_calls = total_judge_calls(judge_results)
+        console.print(
+            f"[dim]Judge cost: ${j_cost:.6f} "
+            f"({j_calls} judge call{'s' if j_calls != 1 else ''})[/dim]"
+        )
     console.print(f"[dim]{pricing_freshness_note()}[/dim]")
+
+
+def _score_cell_for_compare(jr: JudgeResult) -> str:
+    """Render the Score column cell for the compare command's results table."""
+    if not jr.judges:
+        if jr.skipped_models:
+            return f"[dim]-[/dim]"
+        return "[dim]-[/dim]"
+    successful = [j for j in jr.judges if j.score is not None]
+    if not successful:
+        return "[red]N/A[/red]"
+    if len(jr.judges) == 1 and successful:
+        # Single judge: just the score.
+        return str(successful[0].score)
+    # Panel: average + count.
+    if jr.average_score is not None:
+        return f"{jr.average_score:.1f} ({len(successful)})"
+    return "[red]N/A[/red]"
 
 
 def _print_error(message: str) -> None:
