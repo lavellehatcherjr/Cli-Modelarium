@@ -57,6 +57,41 @@ def safe_input_path(user_path: str, *, max_size_bytes: int) -> Path:
     return path
 
 
+def split_escaped_csv(value: str) -> list[str]:
+    """Split a comma-separated string with `\\,` as a literal-comma escape.
+
+    Whitespace around each piece is stripped; empty pieces (e.g. trailing
+    comma) are dropped. Any other backslash is kept verbatim.
+
+    Used by --system-prompts, --judge-criteria, --expected-facts. Lives in
+    io_safety so the various callers don't have to depend on cli.py.
+
+    Example: `split_escaped_csv(r"a,b,c\\,d")` -> `["a", "b", "c,d"]`
+    """
+    out: list[str] = []
+    buf: list[str] = []
+    i = 0
+    while i < len(value):
+        c = value[i]
+        if c == "\\" and i + 1 < len(value) and value[i + 1] == ",":
+            buf.append(",")
+            i += 2
+            continue
+        if c == ",":
+            piece = "".join(buf).strip()
+            if piece:
+                out.append(piece)
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    last = "".join(buf).strip()
+    if last:
+        out.append(last)
+    return out
+
+
 def load_system_prompt(file_path: str) -> str:
     """Load a system prompt from disk.
 
