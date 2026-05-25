@@ -24,7 +24,7 @@ from cli_modelarium.exceptions import (
     RateLimitError,
 )
 from cli_modelarium.pricing import calculate_cost
-from cli_modelarium.providers.base import BaseProvider, CompletionResult
+from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.security import redact_secrets
 
 
@@ -70,6 +70,8 @@ class GoogleProvider(BaseProvider):
         model: str,
         temperature: float,
         system_prompt: str | None = None,
+        *,
+        on_chunk: OnChunk | None = None,
     ) -> CompletionResult:
         config = self._build_config(temperature, system_prompt)
 
@@ -90,6 +92,8 @@ class GoogleProvider(BaseProvider):
                 if chunk.text:
                     if ttft_ms is None:
                         ttft_ms = (time.monotonic() - start) * 1000
+                    if on_chunk is not None:
+                        on_chunk(chunk.text)
                     chunks.append(chunk.text)
                 # Final chunk carries the usage_metadata.
                 usage = getattr(chunk, "usage_metadata", None)
