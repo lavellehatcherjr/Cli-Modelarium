@@ -82,6 +82,20 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     "openai/gpt-oss-safeguard-20b": {"input": 0.10, "output": 0.30, "provider": "groq"},
     "meta-llama/llama-4-scout-17b-16e-instruct": {"input": 0.20, "output": 0.30, "provider": "groq"},
 
+    # ===== OpenRouter =====
+    # OpenRouter aggregates 315+ models behind one API. We register a few
+    # representative entries here; users can pass any OpenRouter model ID and
+    # we'll route it. Models not in this dict get a fallback cost of $0 (the
+    # provider returns real usage data in the response either way).
+    "qwen/qwen3.7-max": {"input": 2.50, "output": 7.50, "provider": "openrouter"},
+    "qwen/qwen3.5-plus": {"input": 0.30, "output": 1.80, "provider": "openrouter"},
+    "qwen/qwen3.6-flash": {"input": 0.19, "output": 1.13, "provider": "openrouter"},
+    "qwen/qwen3-coder:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
+    "deepseek/deepseek-r1:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
+    "meta-llama/llama-3-3-70b-instruct:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
+    "openai/gpt-oss-120b:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
+    "zhipuai/glm-4.7-flash:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
+
     # ===== Local =====
     # Wildcard entry. Any model with `local/` prefix resolves here and costs $0.
     "local/*": {"input": 0.0, "output": 0.0, "provider": "local", "is_local": True},
