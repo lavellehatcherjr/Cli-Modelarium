@@ -20,6 +20,7 @@ from cli_modelarium.exceptions import (
     RateLimitError,
 )
 from cli_modelarium.pricing import calculate_cost
+from cli_modelarium.providers._utils import extract_retry_after
 from cli_modelarium.providers.base import BaseProvider, CompletionResult
 from cli_modelarium.security import redact_secrets
 
@@ -29,10 +30,17 @@ class OpenAIProvider(BaseProvider):
 
     name: str = "openai"
 
-    def __init__(self, api_key: str, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str | None = None,
+        default_headers: dict[str, str] | None = None,
+    ) -> None:
         client_kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url is not None:
             client_kwargs["base_url"] = base_url
+        if default_headers is not None:
+            client_kwargs["default_headers"] = default_headers
         self.client = AsyncOpenAI(**client_kwargs)
 
     def _transform_model(self, model: str) -> str:
@@ -141,25 +149,8 @@ class OpenAIProvider(BaseProvider):
         if isinstance(error, openai.AuthenticationError):
             raise AuthenticationError(message, provider=self.name) from None
         if isinstance(error, openai.RateLimitError):
-            retry_after = _extract_retry_after(error)
+            retry_after = extract_retry_after(error)
             raise RateLimitError(message, provider=self.name, retry_after=retry_after) from None
         if isinstance(error, openai.APIStatusError) and getattr(error, "status_code", None) == 529:
             raise ProviderOverloadedError(message, provider=self.name) from None
         raise ProviderError(message, provider=self.name) from None
-
-
-def _extract_retry_after(error: openai.APIError) -> float | None:
-    """Pull the retry-after value (seconds) from a rate-limit response, if present."""
-    response = getattr(error, "response", None)
-    if response is None:
-        return None
-    headers = getattr(response, "headers", None)
-    if headers is None:
-        return None
-    raw = headers.get("retry-after") or headers.get("Retry-After")
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
