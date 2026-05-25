@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cli-modelarium"
+version = "0.1.0"
+description = "LLM comparison CLI for terminal-first developers. Compare 8 providers (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Groq, OpenRouter) + local Ollama/LM Studio side-by-side with parallel streaming, batch eval, LLM-as-judge, hallucination detection, assertions for CI/CD."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Lavelle Hatcher Jr" }]
+requires-python = ">=3.10"
+keywords = [
+    "llm",
+    "llm-evaluation",
+    "llm-comparison",
+    "ai-tools",
+    "prompt-engineering",
+    "prompt-testing",
+    "cli",
+    "openai",
+    "anthropic",
+    "ollama",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "openai~=1.99",
+    "anthropic~=0.79",
+    "google-genai~=1.0",
+    "mistralai~=2.4",
+    "httpx~=0.28",
+    "click~=8.1",
+    "rich~=14.0",
+    "python-dotenv~=1.2",
+    "keyring~=25.7",
+]
+
+[project.optional-dependencies]
+schema = ["jsonschema~=4.23"]
+dev = [
+    "pytest~=8.0",
+    "pytest-asyncio~=0.24",
+    "pytest-cov~=5.0",
+    "ruff~=0.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/lavellehatcherjr/cli-modelarium"
+Repository = "https://github.com/lavellehatcherjr/cli-modelarium"
+Issues = "https://github.com/lavellehatcherjr/cli-modelarium/issues"
+
+[project.scripts]
+cli-modelarium = "cli_modelarium.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cli_modelarium"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
