@@ -1,7 +1,7 @@
-"""Integration tests for cli.py:_run_compare across multiple providers.
+"""Integration tests for run_streaming_comparison across multiple providers.
 
-These tests don't mock individual SDKs - they replace `_get_provider_instance`
-itself with a factory returning fakes, then verify the orchestration code:
+These tests don't mock individual SDKs - they pass a `provider_factory` of
+fakes directly, then verify the orchestration code:
 
     * routes each model to its correct provider
     * reuses one provider instance for multiple models from the same provider
@@ -15,13 +15,18 @@ from dataclasses import replace
 
 import pytest
 
-from cli_modelarium.cli import _run_compare
 from cli_modelarium.exceptions import ProviderError
-from cli_modelarium.providers.base import BaseProvider, CompletionResult
+from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
+from cli_modelarium.streaming import run_streaming_comparison
 
 
 class _RecordingProvider(BaseProvider):
-    """Fake provider that returns a preset CompletionResult or raises a preset error."""
+    """Fake provider that returns a preset CompletionResult or raises a preset error.
+
+    When `on_chunk` is supplied, the preset output is delivered through it
+    so the orchestrator's state.text gets populated the same way it would
+    with a real provider's streaming.
+    """
 
     def __init__(self, name: str, result_or_error: CompletionResult | Exception) -> None:
         self.name = name
@@ -46,15 +51,20 @@ class _RecordingProvider(BaseProvider):
         model: str,
         temperature: float,
         system_prompt: str | None = None,
+        *,
+        on_chunk: OnChunk | None = None,
     ) -> CompletionResult:
         self.call_count += 1
         self.calls.append((prompt, model, temperature, system_prompt))
         if isinstance(self._result_or_error, Exception):
             raise self._result_or_error
-        return replace(self._result_or_error, model=model, temperature=temperature)
+        result = replace(self._result_or_error, model=model, temperature=temperature)
+        if on_chunk is not None and result.output:
+            on_chunk(result.output)
+        return result
 
 
-async def test_runs_three_providers_in_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_runs_three_providers_in_parallel() -> None:
     fakes = {
         "openai": _RecordingProvider("openai", CompletionResult(output="oa out", provider="openai")),
         "anthropic": _RecordingProvider(
@@ -64,23 +74,24 @@ async def test_runs_three_providers_in_parallel(monkeypatch: pytest.MonkeyPatch)
             "google", CompletionResult(output="google out", provider="google")
         ),
     }
-    monkeypatch.setattr("cli_modelarium.cli._get_provider_instance", lambda name: fakes[name])
 
-    results = await _run_compare(
+    states = await run_streaming_comparison(
         prompt="test prompt",
         models=["gpt-5.5", "claude-opus-4-7", "gemini-3.1-pro"],
         temperatures=[0.0],
         system_prompt=None,
+        provider_factory=lambda name: fakes[name],
+        live_display=False,
     )
 
-    assert len(results) == 3
-    outputs = {r.output for r in results}
+    assert len(states) == 3
+    outputs = {s.text for s in states}
     assert outputs == {"oa out", "ant out", "google out"}
     for f in fakes.values():
         assert f.call_count == 1
 
 
-async def test_one_failure_does_not_kill_others(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_one_failure_does_not_kill_others() -> None:
     fakes = {
         "openai": _RecordingProvider("openai", CompletionResult(output="ok", provider="openai")),
         "anthropic": _RecordingProvider(
@@ -90,28 +101,27 @@ async def test_one_failure_does_not_kill_others(monkeypatch: pytest.MonkeyPatch)
             "google", CompletionResult(output="ok2", provider="google")
         ),
     }
-    monkeypatch.setattr("cli_modelarium.cli._get_provider_instance", lambda name: fakes[name])
 
-    results = await _run_compare(
+    states = await run_streaming_comparison(
         prompt="p",
         models=["gpt-5.5", "claude-opus-4-7", "gemini-3.1-pro"],
         temperatures=[0.0],
         system_prompt=None,
+        provider_factory=lambda name: fakes[name],
+        live_display=False,
     )
 
-    assert len(results) == 3
-    errors = [r for r in results if r.error]
-    successes = [r for r in results if r.error is None]
+    assert len(states) == 3
+    errors = [s for s in states if s.error]
+    successes = [s for s in states if s.error is None]
     assert len(errors) == 1
     assert errors[0].model == "claude-opus-4-7"
-    assert errors[0].provider == "anthropic"
+    assert errors[0].provider_name == "anthropic"
     assert len(successes) == 2
 
 
-async def test_one_provider_instance_per_provider_not_per_model(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """If multiple models come from one provider, only ONE instance is created."""
+async def test_one_provider_instance_per_provider_not_per_model() -> None:
+    """If multiple models come from one provider, the factory is called only ONCE for it."""
     instantiations: dict[str, int] = {}
     fakes: dict[str, _RecordingProvider] = {}
 
@@ -123,58 +133,57 @@ async def test_one_provider_instance_per_provider_not_per_model(
         fakes[name] = provider
         return provider
 
-    monkeypatch.setattr("cli_modelarium.cli._get_provider_instance", make)
-
-    # Two OpenAI models + one Anthropic model = 2 unique providers, 3 model calls
-    results = await _run_compare(
+    states = await run_streaming_comparison(
         prompt="p",
         models=["gpt-5.5", "gpt-5.4", "claude-opus-4-7"],
         temperatures=[0.0],
         system_prompt=None,
+        provider_factory=make,
+        live_display=False,
     )
 
-    assert len(results) == 3
+    assert len(states) == 3
     assert instantiations == {"openai": 1, "anthropic": 1}
-    assert fakes["openai"].call_count == 2  # both openai models routed through same instance
+    assert fakes["openai"].call_count == 2  # both openai models routed through one instance
     assert fakes["anthropic"].call_count == 1
 
 
-async def test_multiple_temperatures_fan_out(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_multiple_temperatures_fan_out() -> None:
     """N models x M temperatures = N*M tasks, all using one client per provider."""
     fake = _RecordingProvider("openai", CompletionResult(output="x", provider="openai"))
-    monkeypatch.setattr("cli_modelarium.cli._get_provider_instance", lambda _: fake)
 
-    results = await _run_compare(
+    states = await run_streaming_comparison(
         prompt="p",
         models=["gpt-5.5", "gpt-5.4"],
         temperatures=[0.0, 0.5, 1.0],
         system_prompt=None,
+        provider_factory=lambda _: fake,
+        live_display=False,
     )
 
-    assert len(results) == 6  # 2 models x 3 temperatures
+    assert len(states) == 6  # 2 models x 3 temperatures
     assert fake.call_count == 6
     temps_seen = sorted(t for _, _, t, _ in fake.calls)
     assert temps_seen == [0.0, 0.0, 0.5, 0.5, 1.0, 1.0]
 
 
-async def test_system_prompt_threaded_through(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_system_prompt_threaded_through() -> None:
     fake = _RecordingProvider("openai", CompletionResult(output="x", provider="openai"))
-    monkeypatch.setattr("cli_modelarium.cli._get_provider_instance", lambda _: fake)
 
-    await _run_compare(
+    await run_streaming_comparison(
         prompt="user",
         models=["gpt-5.5"],
         temperatures=[0.0],
         system_prompt="you are helpful",
+        provider_factory=lambda _: fake,
+        live_display=False,
     )
 
     assert fake.calls[0][3] == "you are helpful"
 
 
-async def test_unexpected_exception_caught_as_result_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An unexpected non-ModelariumError should become an error CompletionResult,
+async def test_unexpected_exception_caught_as_state_error() -> None:
+    """An unexpected non-ModelariumError should become an error StreamState,
     not propagate and kill the whole run.
     """
     fakes = {
@@ -183,16 +192,17 @@ async def test_unexpected_exception_caught_as_result_error(
             "anthropic", CompletionResult(output="ok", provider="anthropic")
         ),
     }
-    monkeypatch.setattr("cli_modelarium.cli._get_provider_instance", lambda name: fakes[name])
 
-    results = await _run_compare(
+    states = await run_streaming_comparison(
         prompt="p",
         models=["gpt-5.5", "claude-opus-4-7"],
         temperatures=[0.0],
         system_prompt=None,
+        provider_factory=lambda name: fakes[name],
+        live_display=False,
     )
 
-    assert len(results) == 2
-    errors = [r for r in results if r.error]
+    assert len(states) == 2
+    errors = [s for s in states if s.error]
     assert len(errors) == 1
     assert "kaboom" in (errors[0].error or "")
