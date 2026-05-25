@@ -79,6 +79,9 @@ class JudgeScore:
     cost_usd: float
     latency_ms: float
     parse_error: str | None = None
+    # Phase 10 hallucination preset: when the custom parser extracts a
+    # Low/Medium/High classification, it lands here. None for normal judging.
+    risk_level: str | None = None
 
 
 @dataclass
@@ -91,6 +94,10 @@ class JudgeResult:
     # Models that were skipped due to self-evaluation - tracked so callers
     # can surface that information in the display.
     skipped_models: list[str] = field(default_factory=list)
+    # Phase 10 hallucination preset: worst-case aggregation across the panel
+    # (any High -> High; else any Medium -> Medium; else Low; else None).
+    # Populated by hallucination.annotate_risk_levels(), not _aggregate.
+    aggregated_risk_level: str | None = None
 
 
 # ===== Response parsing =====
@@ -273,13 +280,20 @@ async def score_with_judge(
     response_to_eval: str,
     criteria: list[str],
     template: str = JUDGE_PROMPT_TEMPLATE,
+    response_parser: Callable[[str], dict] | None = None,
 ) -> JudgeScore:
     """Run one judge model on one response, returning a JudgeScore.
+
+    `response_parser` defaults to `parse_judge_response`. Phase 10's
+    hallucination preset passes `parse_hallucination_response` here to
+    extract the risk_level field alongside score/reasoning.
 
     Errors (network failures, parse failures, anything) are captured into
     JudgeScore.parse_error - we do NOT raise out of this function so a
     panel of judges keeps functioning when one of them goes wrong.
     """
+    parser = response_parser or parse_judge_response
+
     judge_prompt = build_judge_prompt(
         original_prompt, response_to_eval, criteria, template
     )
@@ -309,14 +323,15 @@ async def score_with_judge(
             parse_error=f"judge call failed: {redact_secrets(str(e))}",
         )
 
-    parsed = parse_judge_response(result.output)
+    parsed = parser(result.output)
     return JudgeScore(
         model=judge_model,
-        score=parsed["score"],
-        reasoning=parsed["reasoning"],
+        score=parsed.get("score"),
+        reasoning=parsed.get("reasoning", ""),
         cost_usd=result.cost_usd,
         latency_ms=result.latency_ms,
-        parse_error=parsed["parse_error"],
+        parse_error=parsed.get("parse_error"),
+        risk_level=parsed.get("risk_level"),
     )
 
 
@@ -330,6 +345,7 @@ async def run_judging(
     provider_factory: Callable[[str], BaseProvider],
     *,
     template: str = JUDGE_PROMPT_TEMPLATE,
+    response_parser: Callable[[str], dict] | None = None,
     skip_self_eval: bool = True,
     concurrency: int = 5,
 ) -> list[JudgeResult]:
@@ -372,7 +388,8 @@ async def run_judging(
     ) -> JudgeScore:
         async with semaphore:
             return await score_with_judge(
-                provider, judge_model, original_prompt, response_text, criteria, template,
+                provider, judge_model, original_prompt, response_text,
+                criteria, template, response_parser=response_parser,
             )
 
     async def _score_state(state: StreamState, original_prompt: str) -> JudgeResult:
