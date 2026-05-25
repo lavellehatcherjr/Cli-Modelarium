@@ -22,14 +22,23 @@ from rich.console import Console
 from rich.markdown import Markdown
 
 from cli_modelarium import __version__
+from cli_modelarium.assertions import (
+    AssertionResult,
+    PASS_MARK,
+    FAIL_MARK,
+    ERROR_MARK,
+    count_passed,
+    failed_types,
+    format_assertion_message,
+)
 from cli_modelarium.batch import BatchPrompt
 from cli_modelarium.judging import JudgeResult
 from cli_modelarium.pricing import PRICING_AS_OF, is_local_model
 from cli_modelarium.streaming import StreamState
 
 # Canonical CSV column order. Pinned by tests so downstream pipelines can
-# rely on this layout. Judge columns are appended at the end so existing
-# integrations that ignore unknown columns keep working.
+# rely on this layout. Judge and assertion columns are appended at the end
+# so existing integrations that ignore unknown columns keep working.
 CSV_COLUMNS: tuple[str, ...] = (
     "prompt_id",
     "prompt",
@@ -48,13 +57,16 @@ CSV_COLUMNS: tuple[str, ...] = (
     "judge_score_avg",
     "judge_score_std",
     "judge_count",
+    "assertions_passed",
+    "assertions_total",
+    "assertions_failed_types",
 )
 
 
 @dataclass
 class BatchResult:
     """A single batch row - the union of a StreamState and a BatchPrompt,
-    optionally enriched with judge scores from Phase 8.
+    optionally enriched with judge scores (Phase 8) and assertion results (Phase 9).
     """
 
     prompt_id: str
@@ -71,20 +83,25 @@ class BatchResult:
     output: str
     error: str | None
     retries: int
-    # Phase 9 will execute these and surface pass/fail. For now we carry
-    # them through so the JSON / CSV output round-trips the user's input.
+    # The raw assertion configs from the user's input file. Always preserved
+    # so JSON round-trips the user's intent even when assertions were skipped.
     assertions_raw: list[dict[str, Any]] = field(default_factory=list)
     # Phase 8 judging: None when judging wasn't requested for this batch.
     judge_result: JudgeResult | None = None
+    # Phase 9 assertions: None when assertion execution was skipped
+    # (--no-assertions, or failed main call); empty list when the prompt
+    # simply had no assertions configured.
+    assertion_results: list[AssertionResult] | None = None
 
 
 def state_to_result(
     state: StreamState,
     bp: BatchPrompt,
     judge_result: JudgeResult | None = None,
+    assertion_results: list[AssertionResult] | None = None,
 ) -> BatchResult:
-    """Convert a StreamState + its source BatchPrompt (and optional JudgeResult)
-    into a BatchResult.
+    """Convert a StreamState + its source BatchPrompt (and optional Judge/Assertion
+    results) into a BatchResult.
     """
     return BatchResult(
         prompt_id=bp.id,
@@ -103,6 +120,7 @@ def state_to_result(
         retries=state.attempts,
         assertions_raw=list(bp.assertions),
         judge_result=judge_result,
+        assertion_results=assertion_results,
     )
 
 
@@ -123,6 +141,33 @@ def _judge_count(r: BatchResult) -> int:
     if r.judge_result is None:
         return 0
     return sum(1 for j in r.judge_result.judges if j.score is not None)
+
+
+def _assertion_passed_cell(r: BatchResult) -> Any:
+    """Render assertions_passed for tabular output. Empty when assertions not run."""
+    if r.assertion_results is None:
+        return ""
+    passed, _ = count_passed(r.assertion_results)
+    return passed
+
+
+def _assertion_total_cell(r: BatchResult) -> Any:
+    """Render assertions_total. Empty when not run.
+
+    Uses count_passed's denominator (excludes 'error' rows) so the
+    pass/total ratio is interpretable.
+    """
+    if r.assertion_results is None:
+        return ""
+    _, total = count_passed(r.assertion_results)
+    return total
+
+
+def _assertion_failed_types_cell(r: BatchResult) -> str:
+    """Semicolon-separated list of failed assertion types for CI grep."""
+    if r.assertion_results is None:
+        return ""
+    return ";".join(failed_types(r.assertion_results))
 
 
 # ===== CSV =====
@@ -155,6 +200,9 @@ def _format_csv(results: list[BatchResult]) -> str:
                 "judge_score_avg": _judge_cell_avg(r),
                 "judge_score_std": _judge_cell_std(r),
                 "judge_count": _judge_count(r),
+                "assertions_passed": _assertion_passed_cell(r),
+                "assertions_total": _assertion_total_cell(r),
+                "assertions_failed_types": _assertion_failed_types_cell(r),
             }
         )
     return buf.getvalue()
@@ -184,7 +232,9 @@ def _format_json(results: list[BatchResult]) -> str:
     """Build the JSON payload string with metadata header + results array.
 
     When judging is enabled (any result has a judge_result), include
-    `judge_cost_usd` and `total_cost_usd_with_judges` in the metadata header.
+    `judge_cost_usd` and `total_cost_usd_with_judges`. When assertions ran
+    (any result has assertion_results), include `total_assertions`,
+    `total_assertions_passed`, `pass_rate`.
     """
     total_cost = sum(r.cost_usd for r in results if r.error is None)
     judge_cost = sum(
@@ -194,6 +244,7 @@ def _format_json(results: list[BatchResult]) -> str:
         for j in r.judge_result.judges
     )
     has_judges = any(r.judge_result is not None for r in results)
+    has_assertions = any(r.assertion_results is not None for r in results)
 
     payload: dict[str, Any] = {
         "version": __version__,
@@ -204,9 +255,22 @@ def _format_json(results: list[BatchResult]) -> str:
         "results": [_result_to_dict(r) for r in results],
     }
     if has_judges:
-        # Place judge metadata next to total_cost_usd for at-a-glance reading.
         payload["judge_cost_usd"] = judge_cost
         payload["total_cost_usd_with_judges"] = total_cost + judge_cost
+    if has_assertions:
+        total_passed = 0
+        total_definitive = 0
+        for r in results:
+            if r.assertion_results is None:
+                continue
+            p, d = count_passed(r.assertion_results)
+            total_passed += p
+            total_definitive += d
+        payload["total_assertions"] = total_definitive
+        payload["total_assertions_passed"] = total_passed
+        payload["pass_rate"] = (
+            total_passed / total_definitive if total_definitive else 1.0
+        )
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
@@ -248,6 +312,22 @@ def _result_to_dict(r: BatchResult) -> dict[str, Any]:
         out["judge_score_avg"] = r.judge_result.average_score
         out["judge_score_std"] = r.judge_result.std_dev
         out["judge_skipped"] = list(r.judge_result.skipped_models)
+    if r.assertion_results is not None:
+        # Replace the raw config carryover with the executed results.
+        passed, total = count_passed(r.assertion_results)
+        out["assertions"] = [
+            {
+                "type": a.type,
+                "passed": a.passed,
+                "expected": a.expected,
+                "actual": a.actual,
+                "message": a.message,
+                "error": a.error,
+            }
+            for a in r.assertion_results
+        ]
+        out["assertions_passed"] = passed
+        out["assertions_total"] = total
     return out
 
 
@@ -271,6 +351,7 @@ def _format_markdown(results: list[BatchResult]) -> str:
     total_cost = sum(r.cost_usd for r in results if r.error is None)
     failures = sum(1 for r in results if r.error)
     has_judges = any(r.judge_result is not None for r in results)
+    has_assertions = any(r.assertion_results is not None for r in results)
     judge_cost = sum(
         j.cost_usd
         for r in results
@@ -288,6 +369,20 @@ def _format_markdown(results: list[BatchResult]) -> str:
     if has_judges:
         lines.append(f"- Judge cost: ${judge_cost:.6f}")
         lines.append(f"- Combined cost: ${total_cost + judge_cost:.6f}")
+    if has_assertions:
+        total_passed = 0
+        total_definitive = 0
+        for r in results:
+            if r.assertion_results is None:
+                continue
+            p, d = count_passed(r.assertion_results)
+            total_passed += p
+            total_definitive += d
+        pass_rate = total_passed / total_definitive if total_definitive else 1.0
+        lines.append(
+            f"- Assertions: {total_passed}/{total_definitive} "
+            f"({pass_rate * 100:.1f}% pass rate)"
+        )
     lines.append(f"- Results: {len(results)} ({failures} failed)")
     lines.append("")
 
@@ -306,34 +401,46 @@ def _format_markdown(results: list[BatchResult]) -> str:
             lines.append(f"**System (default):** {_md_escape(first.system)}")
         lines.append("")
 
+        header_cols = ["Model", "Temp", "TTFT (ms)", "Latency (ms)", "In", "Out", "Cost"]
+        align_cols = ["-------", "-----:", "----------:", "-------------:", "---:", "----:", "-----:"]
         if has_judges:
-            lines.append(
-                "| Model | Temp | TTFT (ms) | Latency (ms) | In | Out | Cost | Score | Status |"
-            )
-            lines.append(
-                "|-------|-----:|----------:|-------------:|---:|----:|-----:|:------|:-------|"
-            )
-        else:
-            lines.append(
-                "| Model | Temp | TTFT (ms) | Latency (ms) | In | Out | Cost | Status |"
-            )
-            lines.append(
-                "|-------|-----:|----------:|-------------:|---:|----:|-----:|:-------|"
-            )
+            header_cols.append("Score")
+            align_cols.append(":------")
+        if has_assertions:
+            header_cols.append("Assertions")
+            align_cols.append(":---------")
+        header_cols.append("Status")
+        align_cols.append(":-------")
+        lines.append("| " + " | ".join(header_cols) + " |")
+        lines.append("|" + "|".join(align_cols) + "|")
 
         for r in items:
             ttft = f"{r.ttft_ms:.1f}" if r.ttft_ms is not None else "-"
             latency = f"{r.latency_ms:.1f}" if r.latency_ms is not None else "-"
             cost = "Free" if is_local_model(r.model) else f"${r.cost_usd:.6f}"
             status = "ok" if r.error is None else "error"
-            row = (
-                f"| `{r.model}` | {r.temperature:.1f} | {ttft} | {latency} | "
-                f"{r.input_tokens} | {r.output_tokens} | {cost} |"
-            )
+            cells = [
+                f"`{r.model}`",
+                f"{r.temperature:.1f}",
+                ttft,
+                latency,
+                str(r.input_tokens),
+                str(r.output_tokens),
+                cost,
+            ]
             if has_judges:
-                row += f" {_judge_summary_cell(r)} |"
-            row += f" {status} |"
-            lines.append(row)
+                cells.append(_judge_summary_cell(r))
+            if has_assertions:
+                cells.append(_assertion_summary_cell(r))
+            cells.append(status)
+            lines.append("| " + " | ".join(cells) + " |")
+
+            # Failed-assertion details below the row, so the user can see
+            # WHICH assertion failed without opening the JSON.
+            failure_lines = _assertion_failure_lines(r)
+            if failure_lines:
+                lines.append("")
+                lines.extend(failure_lines)
         lines.append("")
 
         # Per-row outputs in fenced code blocks.
@@ -362,6 +469,43 @@ def render_markdown_to_console(
 ) -> None:
     """Render Markdown via Rich for stdout display."""
     console.print(Markdown(_format_markdown(results)))
+
+
+def _assertion_summary_cell(r: BatchResult) -> str:
+    """Render the markdown Assertions cell for one row.
+
+    Examples:
+        "5/5 ✓"  - all definitive results passed
+        "3/5 ✗"  - some failed (caller can see details in the failure list below)
+        "-"      - assertions didn't run (e.g., main call failed, or no assertions)
+        "⚠ N/M"  - all rows errored (couldn't run, e.g., missing jsonschema)
+    """
+    if r.assertion_results is None or not r.assertion_results:
+        return "-"
+    passed, total = count_passed(r.assertion_results)
+    if total == 0:
+        # All assertions errored out (e.g., jsonschema not installed).
+        return f"{ERROR_MARK} 0/{len(r.assertion_results)}"
+    mark = PASS_MARK if passed == total else FAIL_MARK
+    return f"{passed}/{total} {mark}"
+
+
+def _assertion_failure_lines(r: BatchResult) -> list[str]:
+    """Per-assertion bullets for the row's failures and errors.
+
+    Always shows failing / errored assertions inline. Passing assertions
+    are NOT listed here - they're summarized in the row's cell and the
+    JSON has the full breakdown for downstream tools.
+    """
+    if r.assertion_results is None:
+        return []
+    interesting = [a for a in r.assertion_results if not a.passed]
+    if not interesting:
+        return []
+    out: list[str] = []
+    for a in interesting:
+        out.append(f"- {format_assertion_message(a)}")
+    return out
 
 
 def _judge_summary_cell(r: BatchResult) -> str:
