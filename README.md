@@ -23,7 +23,7 @@ cli-modelarium configure
 
 # Run your first comparison
 cli-modelarium "Explain quantum computing in one sentence" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3-1-pro \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
   --temperatures 0,0.7
 ```
 
@@ -115,7 +115,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ```bash
 cli-modelarium "Write a Python function to find the longest palindromic substring" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3-1-pro
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro
 ```
 
 ### Batch evaluation with assertions
@@ -154,7 +154,7 @@ cli-modelarium batch eval.json \
 
 ```bash
 cli-modelarium "Explain recursion in one paragraph" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3-1-pro,local/llama-3.3-70b \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro,local/llama-3.3-70b \
   --judge claude-opus-4-7 \
   --judge-criteria "accuracy,clarity,brevity"
 ```
