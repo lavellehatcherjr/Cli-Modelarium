@@ -29,6 +29,14 @@ import keyring.errors
 
 SERVICE_NAME = "cli-modelarium"
 
+# Reserved keyring entry name for the user's saved local-provider base URL.
+# Prefixed with an underscore so it cannot collide with any real provider name
+# (the API-key entries are stored under provider names directly).
+LOCAL_URL_KEY = "_local_base_url"
+
+# Environment variable for overriding the local-provider URL from CI/CD.
+LOCAL_URL_ENV_VAR = "CLI_MODELARIUM_LOCAL_URL"
+
 # Format-validation patterns per provider. These check shape only; a
 # correctly-formed key may still be revoked or unauthorized - authentication
 # happens at the provider on the first API call.
@@ -137,3 +145,44 @@ def delete_key(provider: str) -> None:
 def is_key_configured(provider: str) -> bool:
     """Return True if an API key is configured for `provider` (env var or keychain)."""
     return load_key(provider) is not None
+
+
+# ===== Local provider base URL =====
+#
+# The local provider doesn't take an API key, but users still want to persist
+# a non-default URL (e.g. LM Studio at :1234). We use the keyring for the same
+# reasons we use it for API keys: per-user, OS-native storage that survives
+# reboots and doesn't end up in shell history or dotfiles.
+
+
+def save_local_url(url: str) -> None:
+    """Save a custom local-provider base URL to the keychain.
+
+    The URL is NOT validated here - the LocalProvider class owns the
+    localhost-only guard. Callers must validate first; this function only
+    persists.
+    """
+    keyring.set_password(SERVICE_NAME, LOCAL_URL_KEY, url)
+
+
+def load_local_url() -> str | None:
+    """Return the configured local-provider URL, or None if unset.
+
+    Priority: environment variable > keychain > None.
+    """
+    env_value = os.environ.get(LOCAL_URL_ENV_VAR)
+    if env_value:
+        return env_value.strip()
+
+    try:
+        return keyring.get_password(SERVICE_NAME, LOCAL_URL_KEY)
+    except keyring.errors.KeyringError:
+        return None
+
+
+def delete_local_url() -> None:
+    """Remove the saved local-provider URL. Silent if nothing was stored."""
+    try:
+        keyring.delete_password(SERVICE_NAME, LOCAL_URL_KEY)
+    except (keyring.errors.PasswordDeleteError, keyring.errors.KeyringError):
+        pass
