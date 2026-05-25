@@ -41,9 +41,18 @@ from cli_modelarium.security import (
     save_key,
 )
 
-# Lazy provider import map. Filled in as each phase wires up its provider.
+# Lazy provider import map. Each value is `module_path:ClassName` and is
+# resolved via importlib at call time so we don't pay for every SDK import
+# on every CLI invocation (matters for fast `--help` and `list-models`).
 PROVIDER_REGISTRY: dict[str, str] = {
     "openai": "cli_modelarium.providers.openai_provider:OpenAIProvider",
+    "anthropic": "cli_modelarium.providers.anthropic_provider:AnthropicProvider",
+    "google": "cli_modelarium.providers.google_provider:GoogleProvider",
+    "xai": "cli_modelarium.providers.xai_provider:XAIProvider",
+    "deepseek": "cli_modelarium.providers.deepseek_provider:DeepSeekProvider",
+    "groq": "cli_modelarium.providers.groq_provider:GroqProvider",
+    "openrouter": "cli_modelarium.providers.openrouter_provider:OpenRouterProvider",
+    "mistral": "cli_modelarium.providers.mistral_provider:MistralProvider",
 }
 
 # Exit codes used across the CLI (matches CI/CD conventions).
