@@ -13,14 +13,36 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from cli_modelarium import __version__
+from cli_modelarium.batch import (
+    ESTIMATE_INPUT_TOKENS,
+    ESTIMATE_OUTPUT_TOKENS,
+    build_batch_states,
+    check_batch_size_limits,
+    detect_output_format,
+    estimate_batch_cost,
+    load_batch_file,
+    output_overlaps_input,
+    run_batch,
+)
 from cli_modelarium.exceptions import (
+    BatchSizeError,
+    BatchValidationError,
+    CostLimitExceededError,
     KeyNotConfiguredError,
     ModelariumError,
+    OutputFormatError,
     ProviderError,
     UnknownModelError,
     UnknownProviderError,
 )
 from cli_modelarium.io_safety import load_system_prompt
+from cli_modelarium.output_formatters import (
+    render_markdown_to_console,
+    state_to_result,
+    write_csv,
+    write_json,
+    write_markdown,
+)
 from cli_modelarium.models_registry import (
     all_known_providers,
     list_models_for_provider,
@@ -221,35 +243,281 @@ def compare(
 @click.argument("file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--models", required=True, help="Comma-separated model IDs or group names.")
 @click.option("--temperatures", default="0.0", help="Comma-separated temperatures (default: 0.0).")
-@click.option("--system-prompt", help="System prompt applied to every model.")
-@click.option("--system-prompt-file", type=click.Path(), help="Load system prompt from a file.")
-@click.option("--judge", help="Score outputs using this model as judge.")
-@click.option("--judges", help="Comma-separated panel of judges.")
-@click.option("--judge-criteria", help="Comma-separated custom scoring criteria.")
-@click.option("--judge-template", type=click.Path(), help="Custom judge prompt template.")
-@click.option("--include-reasoning", is_flag=True, help="Include judge reasoning in output.")
-@click.option("--check-hallucination", is_flag=True, help="Apply the hallucination detection preset.")
-@click.option("--expected-facts", help="Comma-separated reference facts.")
-@click.option("--expected-facts-file", type=click.Path(), help="Load expected facts from a file.")
-@click.option("--output", type=click.Path(), help="Output file path (CSV/JSON/Markdown).")
+@click.option("--system-prompt", help="System prompt applied to every prompt (per-prompt 'system' field in the input file wins for that prompt).")
+@click.option(
+    "--system-prompts",
+    help="Comma-separated system prompts; the matrix fans out across them. Use \\, for a literal comma.",
+)
+@click.option(
+    "--system-prompt-file",
+    type=click.Path(),
+    help="Load a single system prompt from a UTF-8 file (max 1 MB).",
+)
+@click.option("--judge", help="Score outputs using this model as judge (Phase 8).")
+@click.option("--judges", help="Comma-separated panel of judges (Phase 8).")
+@click.option("--judge-criteria", help="Comma-separated custom scoring criteria (Phase 8).")
+@click.option("--judge-template", type=click.Path(), help="Custom judge prompt template (Phase 8).")
+@click.option("--include-reasoning", is_flag=True, help="Include judge reasoning in output (Phase 8).")
+@click.option("--check-hallucination", is_flag=True, help="Apply the hallucination detection preset (Phase 10).")
+@click.option("--expected-facts", help="Comma-separated reference facts (Phase 10).")
+@click.option("--expected-facts-file", type=click.Path(), help="Load expected facts from a file (Phase 10).")
+@click.option("--output", type=click.Path(), help="Output file path. Format auto-detected from extension; omit to render Markdown on stdout.")
 @click.option(
     "--output-format",
     type=click.Choice(["csv", "json", "markdown"], case_sensitive=False),
-    help="Output format.",
+    help="Override the output format inferred from --output extension.",
 )
-@click.option("--max-cost", type=float, help="Refuse to run if estimated cost exceeds this USD.")
-@click.option("--concurrency", type=int, default=5, help="Max concurrent calls per provider.")
+@click.option("--max-cost", type=float, help="Refuse to run if the estimated cost exceeds this USD.")
+@click.option(
+    "--concurrency",
+    type=int,
+    default=DEFAULT_CONCURRENCY,
+    help=f"Max concurrent calls per provider (default: {DEFAULT_CONCURRENCY}).",
+)
 @click.option("--local-url", help="Override the default URL for the local model server.")
-@click.option("--no-stream", is_flag=True, help="Disable streaming display.")
-@click.option("--min-pass-rate", type=float, help="Exit non-zero if assertion pass rate is below this.")
-@click.option("--no-assertions", is_flag=True, help="Skip assertion checks even if defined.")
-@click.option("--no-judge", is_flag=True, help="Skip judge scoring even if --judge is set.")
-@click.option("--force", is_flag=True, help="Overwrite output file if it exists.")
-@click.option("--force-large", is_flag=True, help="Allow batches larger than 1000 prompts.")
-def batch(**_kwargs: Any) -> None:
-    """Run a multi-prompt batch evaluation from a file."""
-    _print_error("batch: not yet implemented (Phase 7 wires this up)")
-    sys.exit(EXIT_CALL_FAILED)
+@click.option("--min-pass-rate", type=float, help="Exit non-zero if assertion pass rate is below this (Phase 9).")
+@click.option("--no-assertions", is_flag=True, help="Skip assertion checks (Phase 9).")
+@click.option("--no-judge", is_flag=True, help="Skip judge scoring (Phase 8).")
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
+@click.option("--force-large", is_flag=True, help=f"Bypass safety caps (max 1000 prompts, max 10000 calls).")
+def batch(
+    file: str,
+    models: str,
+    temperatures: str,
+    system_prompt: str | None,
+    system_prompts: str | None,
+    system_prompt_file: str | None,
+    judge: str | None,
+    judges: str | None,
+    judge_criteria: str | None,
+    judge_template: str | None,
+    include_reasoning: bool,
+    check_hallucination: bool,
+    expected_facts: str | None,
+    expected_facts_file: str | None,
+    output: str | None,
+    output_format: str | None,
+    max_cost: float | None,
+    concurrency: int,
+    local_url: str | None,
+    min_pass_rate: float | None,
+    no_assertions: bool,
+    no_judge: bool,
+    force: bool,
+    force_large: bool,
+) -> None:
+    """Run a multi-prompt batch evaluation from a file.
+
+    The input file is parsed by extension (.txt or .json). Output format is
+    inferred from --output's extension (.csv / .json / .md), or pass
+    --output-format to override. Omit --output to render Markdown to stdout.
+
+    Per-prompt system prompts: include `"system": "..."` in a JSON prompt
+    object to override the command-line system prompt for that one prompt.
+    """
+    try:
+        prompts = load_batch_file(file)
+        if not prompts:
+            console.print(
+                Panel(
+                    f"No prompts to run - the file at {file} parsed as empty.",
+                    title="Batch",
+                    border_style="yellow",
+                )
+            )
+            return
+
+        model_list = parse_models_arg(models)
+        if not model_list:
+            raise click.UsageError("--models must include at least one model ID or group.")
+        temp_list = _parse_temperatures(temperatures)
+        command_sp_list = _resolve_system_prompts(
+            system_prompt=system_prompt,
+            system_prompts=system_prompts,
+            system_prompt_file=system_prompt_file,
+        )
+    except click.UsageError:
+        raise
+    except (
+        BatchValidationError,
+        UnknownModelError,
+        FileNotFoundError,
+        ValueError,
+    ) as e:
+        _print_error(str(e))
+        sys.exit(EXIT_CALL_FAILED)
+
+    # Resolve output target + format.
+    try:
+        output_path, output_fmt = _resolve_batch_output(
+            input_path=file,
+            output=output,
+            output_format=output_format,
+            force=force,
+        )
+    except OutputFormatError as e:
+        _print_error(str(e))
+        sys.exit(EXIT_CALL_FAILED)
+
+    # Size limits.
+    try:
+        total = check_batch_size_limits(
+            prompts,
+            model_list,
+            temp_list,
+            command_sp_list,
+            force_large=force_large,
+        )
+    except BatchSizeError as e:
+        _print_error(str(e))
+        sys.exit(EXIT_CALL_FAILED)
+
+    # Cost ceiling.
+    if max_cost is not None:
+        est = estimate_batch_cost(prompts, model_list, temp_list, command_sp_list)
+        if est > max_cost:
+            _print_error(
+                f"Estimated cost ${est:.4f} exceeds --max-cost ${max_cost:.4f}.\n"
+                f"  Estimate assumes {ESTIMATE_INPUT_TOKENS} input + "
+                f"{ESTIMATE_OUTPUT_TOKENS} output tokens per call across "
+                f"{total} call{'s' if total != 1 else ''}.\n"
+                f"  Reduce dimensions or raise --max-cost to proceed."
+            )
+            sys.exit(EXIT_CALL_FAILED)
+
+    # Build states + run.
+    def provider_factory(name: str) -> BaseProvider:
+        return _get_provider_instance(name, local_url=local_url)
+
+    pairs = build_batch_states(prompts, model_list, temp_list, command_sp_list)
+    console.print(
+        f"[dim]Running batch: {total} call{'s' if total != 1 else ''} "
+        f"({len(prompts)} prompt{'s' if len(prompts) != 1 else ''} x "
+        f"{len(model_list)} model{'s' if len(model_list) != 1 else ''} x "
+        f"{len(temp_list)} temperature{'s' if len(temp_list) != 1 else ''})[/dim]"
+    )
+
+    try:
+        asyncio.run(
+            run_batch(
+                pairs=pairs,
+                provider_factory=provider_factory,
+                console=console,
+                concurrency=concurrency,
+                show_progress=True,
+            )
+        )
+    except KeyNotConfiguredError as e:
+        _print_error(str(e))
+        sys.exit(EXIT_CALL_FAILED)
+    except ModelariumError as e:
+        _print_error(redact_secrets(str(e)))
+        sys.exit(EXIT_CALL_FAILED)
+
+    # Convert StreamStates to BatchResults and emit.
+    results = [state_to_result(s, bp) for s, bp in pairs]
+    _emit_batch_results(results, output_path=output_path, output_fmt=output_fmt)
+
+    failed = sum(1 for r in results if r.error)
+    success = len(results) - failed
+    total_cost = sum(r.cost_usd for r in results if r.error is None)
+    console.print(
+        f"[green]{success} succeeded[/green], "
+        f"[red]{failed} failed[/red]  "
+        f"[dim]total cost ${total_cost:.6f}[/dim]"
+    )
+
+    # Phase 9 will use EXIT_ASSERTION_FAILED. For now, call failures exit 2.
+    if failed > 0:
+        sys.exit(EXIT_CALL_FAILED)
+    sys.exit(EXIT_OK)
+
+
+def _resolve_batch_output(
+    *,
+    input_path: str,
+    output: str | None,
+    output_format: str | None,
+    force: bool,
+) -> tuple["Path | None", str]:
+    """Decide where to write and which format to use.
+
+    Returns (output_path_or_None, format_name).
+        output_path is None when writing to stdout.
+        format_name is one of: csv, json, markdown.
+
+    Raises OutputFormatError for unknown extensions when --output-format
+    isn't passed, and refuses to overwrite an existing file without --force.
+    """
+    from pathlib import Path
+
+    if output is None:
+        # Stdout default: markdown.
+        return None, (output_format.lower() if output_format else "markdown")
+
+    output_path = Path(output).expanduser().resolve()
+
+    if output_overlaps_input(Path(input_path), output_path):
+        raise OutputFormatError(
+            f"Refusing to write output over the input file ({output_path}).\n"
+            f"  Choose a different --output path."
+        )
+
+    if output_path.exists() and not force:
+        raise OutputFormatError(
+            f"Output file already exists: {output_path}\n"
+            f"  Use --force to overwrite, or pick a different --output path."
+        )
+
+    if output_format:
+        fmt = output_format.lower()
+    else:
+        detected = detect_output_format(output_path)
+        if detected is None:
+            raise OutputFormatError(
+                f"Cannot infer output format from {output_path.suffix!r}.\n"
+                f"  Pass --output-format csv|json|markdown explicitly, "
+                f"or use a recognized extension (.csv .json .md)."
+            )
+        fmt = detected
+
+    # Ensure the parent directory exists - users sometimes pass
+    # `./results/today.csv` without creating ./results/ first.
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return output_path, fmt
+
+
+def _emit_batch_results(
+    results: list, *, output_path: "Path | None", output_fmt: str
+) -> None:
+    """Dispatch to the right writer/renderer based on resolved format."""
+    if output_path is None:
+        # Stdout: only markdown is rendered natively; csv/json get printed raw.
+        if output_fmt == "markdown":
+            render_markdown_to_console(results, console)
+        elif output_fmt == "csv":
+            from cli_modelarium.output_formatters import _format_csv
+
+            console.print(_format_csv(results), end="")
+        elif output_fmt == "json":
+            from cli_modelarium.output_formatters import _format_json
+
+            console.print(_format_json(results), end="")
+        else:
+            _print_error(f"Unsupported output format: {output_fmt!r}")
+            sys.exit(EXIT_CALL_FAILED)
+        return
+
+    if output_fmt == "csv":
+        write_csv(results, output_path)
+    elif output_fmt == "json":
+        write_json(results, output_path)
+    elif output_fmt == "markdown":
+        write_markdown(results, output_path)
+    else:
+        _print_error(f"Unsupported output format: {output_fmt!r}")
+        sys.exit(EXIT_CALL_FAILED)
+    console.print(f"[dim]Wrote {output_path}[/dim]")
 
 
 # ===== configure =====
