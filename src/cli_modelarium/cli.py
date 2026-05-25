@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from typing import Any
 
 import click
@@ -22,7 +21,6 @@ from cli_modelarium.exceptions import (
 )
 from cli_modelarium.models_registry import (
     all_known_providers,
-    get_provider_for_model,
     list_models_for_provider,
     parse_models_arg,
 )
@@ -32,13 +30,18 @@ from cli_modelarium.pricing import (
     is_local_model,
     pricing_freshness_note,
 )
-from cli_modelarium.providers.base import BaseProvider, CompletionResult
+from cli_modelarium.providers.base import BaseProvider
 from cli_modelarium.security import (
     KEY_PATTERNS,
     is_key_configured,
     delete_key,
     redact_secrets,
     save_key,
+)
+from cli_modelarium.streaming import (
+    DEFAULT_CONCURRENCY,
+    StreamState,
+    run_streaming_comparison,
 )
 
 # Lazy provider import map. Each value is `module_path:ClassName` and is
@@ -120,9 +123,14 @@ def main(ctx: click.Context) -> None:
     help="Output format (Phase 7).",
 )
 @click.option("--max-cost", type=float, help="Refuse to run if estimated cost exceeds this USD.")
-@click.option("--concurrency", type=int, default=5, help="Max concurrent calls per provider.")
+@click.option(
+    "--concurrency",
+    type=int,
+    default=DEFAULT_CONCURRENCY,
+    help=f"Max concurrent calls per provider (default: {DEFAULT_CONCURRENCY}).",
+)
 @click.option("--local-url", help="Override default URL for local model server (Phase 5).")
-@click.option("--no-stream", is_flag=True, help="Disable streaming display (Phase 4).")
+@click.option("--no-stream", is_flag=True, help="Disable live streaming display.")
 def compare(
     prompt: str,
     models: str,
@@ -156,8 +164,17 @@ def compare(
         sys.exit(EXIT_CALL_FAILED)
 
     try:
-        results = asyncio.run(
-            _run_compare(prompt, model_list, temp_list, system_prompt)
+        states = asyncio.run(
+            run_streaming_comparison(
+                prompt=prompt,
+                models=model_list,
+                temperatures=temp_list,
+                system_prompt=system_prompt,
+                provider_factory=_get_provider_instance,
+                console=console,
+                concurrency=concurrency,
+                live_display=not no_stream,
+            )
         )
     except KeyNotConfiguredError as e:
         _print_error(str(e))
@@ -166,9 +183,9 @@ def compare(
         _print_error(redact_secrets(str(e)))
         sys.exit(EXIT_CALL_FAILED)
 
-    _display_results(results, prompt)
+    _display_results(states)
 
-    if any(r.error for r in results):
+    if any(s.error for s in states):
         sys.exit(EXIT_CALL_FAILED)
     sys.exit(EXIT_OK)
 
@@ -501,61 +518,10 @@ def _get_provider_instance(provider_name: str) -> BaseProvider:
     return provider_cls(api_key=api_key)
 
 
-async def _run_one(
-    provider: BaseProvider,
-    model: str,
-    temperature: float,
-    prompt: str,
-    system_prompt: str | None,
-) -> CompletionResult:
-    """Run a single completion, wrapping any error into a CompletionResult."""
-    try:
-        return await provider.complete(prompt, model, temperature, system_prompt)
-    except ModelariumError as e:
-        return CompletionResult(
-            model=model,
-            provider=provider.name,
-            temperature=temperature,
-            error=redact_secrets(str(e)),
-        )
-    except Exception as e:
-        return CompletionResult(
-            model=model,
-            provider=provider.name,
-            temperature=temperature,
-            error=redact_secrets(f"Unexpected error: {e}"),
-        )
-
-
-async def _run_compare(
-    prompt: str,
-    models: list[str],
-    temperatures: list[float],
-    system_prompt: str | None,
-) -> list[CompletionResult]:
-    """Run every (model x temperature) pair in parallel and collect results."""
-    # Validate models and group them by provider so we instantiate one client per provider.
-    provider_for_model: dict[str, str] = {}
-    for model in models:
-        provider_for_model[model] = get_provider_for_model(model)
-
-    instances: dict[str, BaseProvider] = {}
-    for provider_name in set(provider_for_model.values()):
-        instances[provider_name] = _get_provider_instance(provider_name)
-
-    tasks = []
-    for model in models:
-        provider = instances[provider_for_model[model]]
-        for temperature in temperatures:
-            tasks.append(_run_one(provider, model, temperature, prompt, system_prompt))
-
-    return await asyncio.gather(*tasks)
-
-
-def _display_results(results: list[CompletionResult], prompt: str) -> None:
+def _display_results(states: list[StreamState]) -> None:
     """Render the comparison results as a Rich table plus per-model output blocks."""
     table = Table(
-        title=f"Comparing {len(results)} completion{'s' if len(results) != 1 else ''}",
+        title=f"Comparing {len(states)} completion{'s' if len(states) != 1 else ''}",
         border_style="dim",
         title_justify="left",
     )
@@ -569,8 +535,8 @@ def _display_results(results: list[CompletionResult], prompt: str) -> None:
     table.add_column("Status")
 
     total_cost = 0.0
-    for r in results:
-        if r.error:
+    for s in states:
+        if s.error:
             status = "[red]error[/red]"
             cost_text = "[dim]-[/dim]"
             ttft_text = "[dim]-[/dim]"
@@ -579,16 +545,16 @@ def _display_results(results: list[CompletionResult], prompt: str) -> None:
             out_text = "[dim]-[/dim]"
         else:
             status = "[green]ok[/green]"
-            total_cost += r.cost_usd
-            cost_text = "[dim]Free[/dim]" if is_local_model(r.model) else f"${r.cost_usd:.6f}"
-            ttft_text = f"{r.ttft_ms / 1000:.2f}s" if r.ttft_ms is not None else "[dim]-[/dim]"
-            latency_text = f"{r.latency_ms / 1000:.2f}s"
-            in_text = str(r.input_tokens)
-            out_text = str(r.output_tokens)
+            total_cost += s.cost_usd
+            cost_text = "[dim]Free[/dim]" if is_local_model(s.model) else f"${s.cost_usd:.6f}"
+            ttft_text = f"{s.ttft_ms / 1000:.2f}s" if s.ttft_ms is not None else "[dim]-[/dim]"
+            latency_text = f"{s.latency_ms / 1000:.2f}s" if s.latency_ms is not None else "[dim]-[/dim]"
+            in_text = str(s.input_tokens)
+            out_text = str(s.output_tokens)
 
         table.add_row(
-            r.model,
-            f"{r.temperature:.1f}",
+            s.model,
+            f"{s.temperature:.1f}",
             ttft_text,
             latency_text,
             in_text,
@@ -601,13 +567,13 @@ def _display_results(results: list[CompletionResult], prompt: str) -> None:
     console.print()
 
     # Per-model output blocks
-    for r in results:
-        header = f"[bold cyan]>[/bold cyan] [bold]{r.model}[/bold] @ {r.temperature:.1f}"
+    for s in states:
+        header = f"[bold cyan]>[/bold cyan] [bold]{s.model}[/bold] @ {s.temperature:.1f}"
         console.print(header)
-        if r.error:
-            console.print(f"  [red]{r.error}[/red]")
+        if s.error:
+            console.print(f"  [red]{s.error}[/red]")
         else:
-            for line in r.output.splitlines() or [""]:
+            for line in s.text.splitlines() or [""]:
                 console.print(f"  {line}")
         console.print()
 
