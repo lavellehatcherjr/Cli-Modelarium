@@ -68,7 +68,15 @@ class CostLimitExceededError(ModelariumError):
 
 
 class BatchValidationError(ModelariumError):
-    """Raised when a batch file fails validation (size, format, content)."""
+    """Raised when a batch file fails validation (format, content)."""
+
+
+class BatchSizeError(BatchValidationError):
+    """Raised when batch dimensions exceed safety limits without --force-large."""
+
+
+class OutputFormatError(ModelariumError):
+    """Raised when the output format cannot be inferred or is unsupported."""
 
 
 class LocalURLError(ConfigurationError):
