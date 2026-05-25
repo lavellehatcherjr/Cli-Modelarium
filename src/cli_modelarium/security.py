@@ -13,6 +13,17 @@ from __future__ import annotations
 import os
 import re
 
+# `keyring` lazily probes its native backends on first access. On Linux the
+# default backend is SecretService, which pulls in `secretstorage` ->
+# `cryptography` -> a Rust extension that needs the `_cffi_backend` module
+# from the `cffi` package. Minimal containers sometimes ship cryptography
+# without cffi, which produces a Rust-side panic the moment any keyring call
+# runs (including get_keyring()). The fix on the system side is one of:
+#
+#     pip install cffi                                 (pure-pip environments)
+#     apt-get install build-essential libffi-dev       (debian-derived images)
+#
+# CI must install one of these before running this package's tests.
 import keyring
 import keyring.errors
 
