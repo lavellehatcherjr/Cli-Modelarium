@@ -1,4 +1,7 @@
-# Cli Modelarium
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/cli-modelarium-wordmark-dark.svg">
+  <img alt="cli modelarium" src="docs/assets/cli-modelarium-wordmark-light.svg" width="420">
+</picture>
 
 > Compare LLM outputs side-by-side from your terminal - 8 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
 
