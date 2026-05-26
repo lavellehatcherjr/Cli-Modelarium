@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 56" role="img" aria-label="cli modelarium">
+  <title>cli modelarium</title>
+  <desc>The cli modelarium wordmark for dark backgrounds: a terminal cursor block followed by the name in split colors, with cli in Tokyo Night blue and modelarium in off-white.</desc>
+
+  <!-- Terminal cursor block -->
+  <rect x="6" y="10" width="6" height="38" rx="1" fill="#7AA2F7"/>
+
+  <!-- Wordmark, split-color treatment (dark mode) -->
+  <text x="22" y="42"
+        font-family="'JetBrains Mono','Fira Code','Cascadia Code','IBM Plex Mono','Menlo','Consolas','Courier New',monospace"
+        font-weight="700"
+        font-size="36"
+        letter-spacing="-0.5">
+    <tspan fill="#7AA2F7">cli </tspan><tspan fill="#FAFAFA">modelarium</tspan>
+  </text>
+</svg>
