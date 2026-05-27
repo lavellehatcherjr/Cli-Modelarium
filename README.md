@@ -112,7 +112,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - Works identically on macOS, Windows (10+ and ARM), and Linux
 - All file I/O uses `pathlib` + explicit UTF-8 encoding
 - CSV writing uses `newline=""` for Windows compatibility
-- Python 3.10+ required
+- Python 3.11+ required
 
 ### 📋 Developer experience
 
@@ -358,6 +358,23 @@ export GOOGLE_API_KEY=...
 ```
 
 Environment variables take precedence over keychain storage.
+
+### Headless Linux servers
+
+On Linux servers without a desktop environment (no `gnome-keyring`, KWallet, or other Secret Service backend), the OS keyring may not be available — common on CI/CD runners, cloud VMs, and Docker containers. In that case, skip `cli-modelarium configure` and `keys set` entirely, and use environment variables instead:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export GOOGLE_API_KEY="..."        # or GEMINI_API_KEY
+export MISTRAL_API_KEY="..."
+export XAI_API_KEY="xai-..."
+export DEEPSEEK_API_KEY="sk-..."
+export GROQ_API_KEY="gsk_..."
+export OPENROUTER_API_KEY="sk-or-..."
+```
+
+`cli-modelarium` checks environment variables before the OS keyring, so this works out of the box. If you prefer a keyring on Linux, install `gnome-keyring` (GNOME), KWallet (KDE), or `keyrings.alt` (file-based fallback).
 
 ### Local models (Ollama, LM Studio, etc.)
 
