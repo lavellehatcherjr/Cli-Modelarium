@@ -8,6 +8,7 @@ rather than a half-written one.
 its source `BatchPrompt`. The CSV column order is the spec'd canonical
 order and tests pin it explicitly.
 """
+
 from __future__ import annotations
 
 import csv
@@ -23,10 +24,10 @@ from rich.markdown import Markdown
 
 from cli_modelarium import __version__
 from cli_modelarium.assertions import (
-    AssertionResult,
-    PASS_MARK,
-    FAIL_MARK,
     ERROR_MARK,
+    FAIL_MARK,
+    PASS_MARK,
+    AssertionResult,
     count_passed,
     failed_types,
     format_assertion_message,
@@ -93,6 +94,10 @@ class BatchResult:
     # (--no-assertions, or failed main call); empty list when the prompt
     # simply had no assertions configured.
     assertion_results: list[AssertionResult] | None = None
+    # v0.1.1: 0 for single-run/batch flows (the default); 0..N-1 for the
+    # compare command's --runs N flag. Only emitted in CSV/JSON/Markdown
+    # when the surrounding `runs` parameter > 1.
+    run_index: int = 0
 
 
 def state_to_result(
@@ -122,6 +127,7 @@ def state_to_result(
         assertions_raw=list(bp.assertions),
         judge_result=judge_result,
         assertion_results=assertion_results,
+        run_index=state.run_index,
     )
 
 
@@ -185,45 +191,53 @@ def _assertion_failed_types_cell(r: BatchResult) -> str:
 # ===== CSV =====
 
 
-def _format_csv(results: list[BatchResult]) -> str:
+def _format_csv(results: list[BatchResult], runs: int = 1) -> str:
     """Build the full CSV text. Output field newlines are escaped to literal \\n
     so cells don't break spreadsheet imports.
+
+    When `runs > 1` an additional `run_index` column is appended to every
+    row. When `runs == 1` (the default) the column set is byte-identical
+    to v0.1.0.
     """
+    fieldnames = list(CSV_COLUMNS)
+    if runs > 1:
+        fieldnames.append("run_index")
     buf = io.StringIO(newline="")
-    writer = csv.DictWriter(buf, fieldnames=list(CSV_COLUMNS), extrasaction="ignore")
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
     for r in results:
-        writer.writerow(
-            {
-                "prompt_id": r.prompt_id,
-                "prompt": _csv_escape(r.prompt),
-                "system": _csv_escape(r.system or ""),
-                "model": r.model,
-                "temperature": r.temperature,
-                "latency_ms": _none_or(r.latency_ms),
-                "ttft_ms": _none_or(r.ttft_ms),
-                "input_tokens": r.input_tokens,
-                "output_tokens": r.output_tokens,
-                "cached_tokens": r.cached_tokens,
-                "cost_usd": r.cost_usd,
-                "output": _csv_escape(r.output),
-                "error": _csv_escape(r.error or ""),
-                "retries": r.retries,
-                "judge_score_avg": _judge_cell_avg(r),
-                "judge_score_std": _judge_cell_std(r),
-                "judge_count": _judge_count(r),
-                "hallucination_risk": _hallucination_risk_cell(r),
-                "assertions_passed": _assertion_passed_cell(r),
-                "assertions_total": _assertion_total_cell(r),
-                "assertions_failed_types": _assertion_failed_types_cell(r),
-            }
-        )
+        row = {
+            "prompt_id": r.prompt_id,
+            "prompt": _csv_escape(r.prompt),
+            "system": _csv_escape(r.system or ""),
+            "model": r.model,
+            "temperature": r.temperature,
+            "latency_ms": _none_or(r.latency_ms),
+            "ttft_ms": _none_or(r.ttft_ms),
+            "input_tokens": r.input_tokens,
+            "output_tokens": r.output_tokens,
+            "cached_tokens": r.cached_tokens,
+            "cost_usd": r.cost_usd,
+            "output": _csv_escape(r.output),
+            "error": _csv_escape(r.error or ""),
+            "retries": r.retries,
+            "judge_score_avg": _judge_cell_avg(r),
+            "judge_score_std": _judge_cell_std(r),
+            "judge_count": _judge_count(r),
+            "hallucination_risk": _hallucination_risk_cell(r),
+            "assertions_passed": _assertion_passed_cell(r),
+            "assertions_total": _assertion_total_cell(r),
+            "assertions_failed_types": _assertion_failed_types_cell(r),
+        }
+        if runs > 1:
+            row["run_index"] = r.run_index
+        writer.writerow(row)
     return buf.getvalue()
 
 
-def write_csv(results: list[BatchResult], output_path: Path) -> None:
+def write_csv(results: list[BatchResult], output_path: Path, runs: int = 1) -> None:
     """Atomic write of `results` to `output_path` as CSV."""
-    atomic_write_bytes(output_path, _format_csv(results).encode("utf-8"))
+    atomic_write_bytes(output_path, _format_csv(results, runs=runs).encode("utf-8"))
 
 
 def _csv_escape(text: str) -> str:
@@ -241,20 +255,32 @@ def _none_or(value: float | None) -> Any:
 # ===== JSON =====
 
 
-def _format_json(results: list[BatchResult]) -> str:
+def _format_json(
+    results: list[BatchResult],
+    runs: int = 1,
+    significance_results: list | None = None,
+) -> str:
     """Build the JSON payload string with metadata header + results array.
 
     When judging is enabled (any result has a judge_result), include
     `judge_cost_usd` and `total_cost_usd_with_judges`. When assertions ran
     (any result has assertion_results), include `total_assertions`,
     `total_assertions_passed`, `pass_rate`.
+
+    When `runs > 1`, additive fields appear:
+        * top-level `total_runs`
+        * top-level `stats_by_cell` array (one entry per cell)
+        * each result record gains a `run_index`
+    When `runs == 1`, the schema is byte-identical to v0.1.0.
+
+    When `significance_results` is provided and non-empty, a
+    `significance_tests` array is added. When it's None/empty, no new
+    key appears - so output stays byte-identical for callers who don't
+    use significance.
     """
     total_cost = sum(r.cost_usd for r in results if r.error is None)
     judge_cost = sum(
-        j.cost_usd
-        for r in results
-        if r.judge_result is not None
-        for j in r.judge_result.judges
+        j.cost_usd for r in results if r.judge_result is not None for j in r.judge_result.judges
     )
     has_judges = any(r.judge_result is not None for r in results)
     has_assertions = any(r.assertion_results is not None for r in results)
@@ -265,8 +291,11 @@ def _format_json(results: list[BatchResult]) -> str:
         "total_cost_usd": total_cost,
         "total_results": len(results),
         "failed_results": sum(1 for r in results if r.error),
-        "results": [_result_to_dict(r) for r in results],
+        "results": [_result_to_dict(r, include_run_index=runs > 1) for r in results],
     }
+    if runs > 1:
+        payload["total_runs"] = runs
+        payload["stats_by_cell"] = _build_stats_by_cell(results)
     if has_judges:
         payload["judge_cost_usd"] = judge_cost
         payload["total_cost_usd_with_judges"] = total_cost + judge_cost
@@ -281,18 +310,130 @@ def _format_json(results: list[BatchResult]) -> str:
             total_definitive += d
         payload["total_assertions"] = total_definitive
         payload["total_assertions_passed"] = total_passed
-        payload["pass_rate"] = (
-            total_passed / total_definitive if total_definitive else 1.0
-        )
+        payload["pass_rate"] = total_passed / total_definitive if total_definitive else 1.0
+    if significance_results:
+        payload["significance_tests"] = [
+            {
+                "model_a": r.model_a,
+                "model_b": r.model_b,
+                "metric": r.metric,
+                "n_a": r.n_a,
+                "n_b": r.n_b,
+                "mean_a": r.mean_a,
+                "mean_b": r.mean_b,
+                "stdev_a": r.stdev_a,
+                "stdev_b": r.stdev_b,
+                "test_used": r.test_used,
+                "test_statistic": r.test_statistic,
+                "degrees_of_freedom": r.degrees_of_freedom,
+                "p_value": r.p_value,
+                "p_value_corrected": r.p_value_corrected,
+                "correction_method": r.correction_method,
+                "n_comparisons": r.n_comparisons,
+                "effect_size": r.effect_size,
+                "effect_size_metric": "cohens_d",
+                "effect_size_interpretation": r.effect_size_interpretation,
+                "threshold": r.threshold,
+                "significant_at_threshold": r.significant_at_threshold,
+            }
+            for r in significance_results
+        ]
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def write_json(results: list[BatchResult], output_path: Path) -> None:
+def write_json(
+    results: list[BatchResult],
+    output_path: Path,
+    runs: int = 1,
+    significance_results: list | None = None,
+) -> None:
     """Atomic write of `results` to `output_path` as JSON."""
-    atomic_write_bytes(output_path, _format_json(results).encode("utf-8"))
+    atomic_write_bytes(
+        output_path,
+        _format_json(
+            results, runs=runs, significance_results=significance_results
+        ).encode("utf-8"),
+    )
 
 
-def _result_to_dict(r: BatchResult) -> dict[str, Any]:
+def _build_stats_by_cell(results: list[BatchResult]) -> list[dict[str, Any]]:
+    """Aggregate per-cell stats for JSON output when runs > 1.
+
+    A "cell" is the (model, temperature, system) tuple. Iteration order
+    follows first-seen order in `results`, so the output is deterministic.
+    """
+    grouped: dict[tuple[str, float, str | None], list[BatchResult]] = {}
+    insertion_order: list[tuple[str, float, str | None]] = []
+    for r in results:
+        key = (r.model, r.temperature, r.system)
+        if key not in grouped:
+            grouped[key] = []
+            insertion_order.append(key)
+        grouped[key].append(r)
+
+    out: list[dict[str, Any]] = []
+    for key in insertion_order:
+        cell = grouped[key]
+        model, temp, sp = key
+        latencies = [r.latency_ms for r in cell if r.error is None and r.latency_ms is not None]
+        token_counts = [r.output_tokens for r in cell if r.error is None]
+        costs = [r.cost_usd for r in cell if r.error is None]
+        outputs = [r.output for r in cell if r.error is None]
+        n_succeeded = sum(1 for r in cell if r.error is None)
+        n_failed = sum(1 for r in cell if r.error is not None)
+
+        if len(latencies) >= 2:
+            stdev = _safe_stdev(latencies)
+            mean = _safe_mean(latencies)
+            cv = stdev / mean if mean and stdev is not None else None
+        else:
+            stdev = None
+            cv = None
+
+        from collections import Counter as _Counter
+
+        counter = _Counter(outputs)
+        unique = len(counter)
+        if unique < n_succeeded and counter:
+            mode_output, mode_count = counter.most_common(1)[0]
+        else:
+            mode_output, mode_count = None, 0
+
+        out.append(
+            {
+                "model": model,
+                "temperature": temp,
+                "system": sp,
+                "n_runs": len(cell),
+                "n_succeeded": n_succeeded,
+                "n_failed": n_failed,
+                "latency_mean_ms": _safe_mean(latencies),
+                "latency_stdev_ms": stdev,
+                "latency_cv": cv,
+                "output_tokens_mean": _safe_mean(token_counts) if token_counts else None,
+                "cost_total_usd": sum(costs),
+                "unique_outputs": unique,
+                "mode_output": mode_output,
+                "mode_count": mode_count,
+                "output_diversity": (unique / n_succeeded) if n_succeeded else 0.0,
+            }
+        )
+    return out
+
+
+def _safe_mean(values: list[float]) -> float | None:
+    import statistics as _s
+
+    return _s.mean(values) if values else None
+
+
+def _safe_stdev(values: list[float]) -> float | None:
+    import statistics as _s
+
+    return _s.stdev(values) if len(values) >= 2 else None
+
+
+def _result_to_dict(r: BatchResult, include_run_index: bool = False) -> dict[str, Any]:
     out: dict[str, Any] = {
         "prompt_id": r.prompt_id,
         "prompt": r.prompt,
@@ -310,6 +451,8 @@ def _result_to_dict(r: BatchResult) -> dict[str, Any]:
         "retries": r.retries,
         "assertions": r.assertions_raw,
     }
+    if include_run_index:
+        out["run_index"] = r.run_index
     if r.judge_result is not None:
         out["judges"] = [
             {
@@ -352,12 +495,16 @@ def _result_to_dict(r: BatchResult) -> dict[str, Any]:
 # ===== Markdown =====
 
 
-def _format_markdown(results: list[BatchResult]) -> str:
+def _format_markdown(results: list[BatchResult], runs: int = 1) -> str:
     """Render results as Markdown grouped by prompt_id.
 
     Each prompt gets its own H2 section with a sub-table of
     (model, temperature, TTFT, latency, cost, status) rows; outputs follow
     the table in code-block form for readability.
+
+    When `runs > 1`, a "Per-cell statistical summary" section is appended
+    after the per-prompt sections. When `runs == 1`, the output is
+    byte-identical to v0.1.0.
     """
     if not results:
         return (
@@ -373,15 +520,11 @@ def _format_markdown(results: list[BatchResult]) -> str:
     # Detect hallucination mode from the data: any judge has a risk_level
     # set, which means parse_hallucination_response was used.
     has_hallucination = any(
-        r.judge_result is not None
-        and any(j.risk_level for j in r.judge_result.judges)
+        r.judge_result is not None and any(j.risk_level for j in r.judge_result.judges)
         for r in results
     )
     judge_cost = sum(
-        j.cost_usd
-        for r in results
-        if r.judge_result is not None
-        for j in r.judge_result.judges
+        j.cost_usd for r in results if r.judge_result is not None for j in r.judge_result.judges
     )
 
     lines: list[str] = [
@@ -405,8 +548,7 @@ def _format_markdown(results: list[BatchResult]) -> str:
             total_definitive += d
         pass_rate = total_passed / total_definitive if total_definitive else 1.0
         lines.append(
-            f"- Assertions: {total_passed}/{total_definitive} "
-            f"({pass_rate * 100:.1f}% pass rate)"
+            f"- Assertions: {total_passed}/{total_definitive} ({pass_rate * 100:.1f}% pass rate)"
         )
     lines.append(f"- Results: {len(results)} ({failures} failed)")
     lines.append("")
@@ -427,7 +569,15 @@ def _format_markdown(results: list[BatchResult]) -> str:
         lines.append("")
 
         header_cols = ["Model", "Temp", "TTFT (ms)", "Latency (ms)", "In", "Out", "Cost"]
-        align_cols = ["-------", "-----:", "----------:", "-------------:", "---:", "----:", "-----:"]
+        align_cols = [
+            "-------",
+            "-----:",
+            "----------:",
+            "-------------:",
+            "---:",
+            "----:",
+            "-----:",
+        ]
         if has_judges:
             header_cols.append("Hallucination Risk" if has_hallucination else "Score")
             align_cols.append(":------")
@@ -484,19 +634,67 @@ def _format_markdown(results: list[BatchResult]) -> str:
                 lines.append("```")
             lines.append("")
 
+    if runs > 1:
+        lines.append("## Per-cell statistical summary")
+        lines.append("")
+        lines.append(
+            "| Model | Temp | OK/Fail | Latency mean ± stdev (ms) | CV | "
+            "Tokens mean | Cost total | Diversity | Mode |"
+        )
+        lines.append("|-------|-----:|--------:|--------------------------:|---:|"
+                     "------------:|-----------:|----------:|------|")
+        for cell in _build_stats_by_cell(results):
+            latency_cell = "-"
+            if cell["latency_mean_ms"] is not None and cell["latency_stdev_ms"] is not None:
+                latency_cell = (
+                    f"{cell['latency_mean_ms']:.0f} ± {cell['latency_stdev_ms']:.0f}"
+                )
+            elif cell["latency_mean_ms"] is not None:
+                latency_cell = f"{cell['latency_mean_ms']:.0f}"
+            cv_cell = f"{cell['latency_cv']:.3f}" if cell["latency_cv"] is not None else "-"
+            tokens_cell = (
+                f"{cell['output_tokens_mean']:.0f}"
+                if cell["output_tokens_mean"] is not None
+                else "-"
+            )
+            if cell["mode_output"] is None:
+                mode_cell = "(no mode)"
+            else:
+                preview = cell["mode_output"].replace("\n", " ").strip()
+                if len(preview) > 40:
+                    preview = preview[:37] + "..."
+                mode_cell = f"`{preview}` ({cell['mode_count']}x)"
+            row = (
+                f"| `{cell['model']}` "
+                f"| {cell['temperature']:.1f} "
+                f"| {cell['n_succeeded']}/{cell['n_failed']} "
+                f"| {latency_cell} "
+                f"| {cv_cell} "
+                f"| {tokens_cell} "
+                f"| ${cell['cost_total_usd']:.6f} "
+                f"| {cell['output_diversity']:.2f} "
+                f"| {mode_cell} |"
+            )
+            lines.append(row)
+        lines.append("")
+        lines.append(
+            "_Coefficient of variation (CV) < 0.05 indicates stable model behavior._"
+        )
+        lines.append("")
+
     return "\n".join(lines)
 
 
-def write_markdown(results: list[BatchResult], output_path: Path) -> None:
+def write_markdown(results: list[BatchResult], output_path: Path, runs: int = 1) -> None:
     """Atomic write of `results` to `output_path` as Markdown."""
-    atomic_write_bytes(output_path, _format_markdown(results).encode("utf-8"))
+    atomic_write_bytes(output_path, _format_markdown(results, runs=runs).encode("utf-8"))
 
 
 def render_markdown_to_console(
-    results: list[BatchResult], console: Console
+    results: list[BatchResult], console: Console, runs: int = 1
 ) -> None:
     """Render Markdown via Rich for stdout display."""
-    console.print(Markdown(_format_markdown(results)))
+    console.print(Markdown(_format_markdown(results, runs=runs)))
 
 
 def _assertion_summary_cell(r: BatchResult) -> str:
@@ -545,10 +743,7 @@ def _hallucination_summary_cell(r: BatchResult) -> str:
     """
     if r.judge_result is None or not r.judge_result.judges:
         return "-"
-    successful = [
-        j for j in r.judge_result.judges
-        if j.score is not None and j.risk_level
-    ]
+    successful = [j for j in r.judge_result.judges if j.score is not None and j.risk_level]
     if not successful:
         return "N/A"
 
@@ -559,7 +754,8 @@ def _hallucination_summary_cell(r: BatchResult) -> str:
         return f"{s.risk_level} ({s.score})"
 
     breakdown = ", ".join(
-        f"{j.model.split('/')[-1]}: {j.risk_level or '?'} ({j.score if j.score is not None else 'X'})"
+        f"{j.model.split('/')[-1]}: {j.risk_level or '?'} "
+        f"({j.score if j.score is not None else 'X'})"
         for j in r.judge_result.judges
     )
     return f"{risk} [{breakdown}]"
@@ -587,8 +783,7 @@ def _judge_summary_cell(r: BatchResult) -> str:
 
     avg = r.judge_result.average_score
     breakdown = ", ".join(
-        f"{j.model.split('/')[-1]}: {j.score if j.score is not None else 'X'}"
-        for j in judges
+        f"{j.model.split('/')[-1]}: {j.score if j.score is not None else 'X'}" for j in judges
     )
     return f"Avg {avg:.1f} [{breakdown}]" if avg is not None else f"[{breakdown}]"
 
@@ -598,11 +793,7 @@ def _md_escape(text: str) -> str:
     # Limit to characters that would break a single-line table cell.
     if not text:
         return ""
-    return (
-        text.replace("\\", "\\\\")
-        .replace("|", "\\|")
-        .replace("\n", " / ")
-    )
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " / ")
 
 
 # ===== Atomic write helper =====
