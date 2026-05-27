@@ -5,6 +5,7 @@ has `.text_stream` (an async iterator of strings) and `.get_final_message()`
 (an awaitable returning a Message with `.usage`). The fakes here implement
 that protocol exactly.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -24,7 +25,6 @@ from cli_modelarium.providers.anthropic_provider import (
     DEFAULT_MAX_TOKENS,
     AnthropicProvider,
 )
-
 
 # ===== fake stream plumbing =====
 
@@ -51,6 +51,7 @@ class _FakeInnerStream:
         async def gen() -> Any:
             for t in self._chunks:
                 yield t
+
         return gen()
 
     async def get_final_message(self) -> Any:
@@ -71,7 +72,9 @@ class _FakeStreamManager:
 
 
 class _FakeMessages:
-    def __init__(self, inner: _FakeInnerStream | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, inner: _FakeInnerStream | None = None, error: Exception | None = None
+    ) -> None:
         self._inner = inner
         self._error = error
         self.last_kwargs: dict[str, Any] = {}
@@ -99,8 +102,10 @@ def _make_provider(
 ) -> tuple[AnthropicProvider, _FakeMessages]:
     inner = (
         _FakeInnerStream(
-            text_chunks or [], input_tokens=input_tokens,
-            output_tokens=output_tokens, cached_tokens=cached_tokens,
+            text_chunks or [],
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
         )
         if error is None
         else None
@@ -177,9 +182,7 @@ async def test_system_prompt_passed_at_top_level(monkeypatch: pytest.MonkeyPatch
         monkeypatch, text_chunks=["ok"], input_tokens=1, output_tokens=1
     )
 
-    await provider.complete(
-        "user prompt", "claude-opus-4-7", 0.0, system_prompt="you are helpful"
-    )
+    await provider.complete("user prompt", "claude-opus-4-7", 0.0, system_prompt="you are helpful")
 
     # `system` must be a top-level kwarg, NOT in the messages array.
     assert messages.last_kwargs["system"] == "you are helpful"
