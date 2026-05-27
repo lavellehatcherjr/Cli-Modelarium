@@ -1,4 +1,5 @@
 """Custom exception classes for Cli Modelarium."""
+
 from __future__ import annotations
 
 
