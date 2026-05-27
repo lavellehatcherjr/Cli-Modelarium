@@ -1,4 +1,5 @@
 """Provider abstraction: every concrete provider implements this interface."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
