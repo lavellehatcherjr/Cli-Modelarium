@@ -181,6 +181,77 @@ Opt out:
 cli-modelarium "Q" --models gpt-5.5,claude --runs 10 --no-significance
 ```
 
+### Bootstrap confidence intervals (v0.1.3)
+
+Every reported mean comes with a bootstrap confidence interval showing
+measurement uncertainty. CIs are auto-enabled whenever `--runs > 1`, and the
+default method is BCa (bias-corrected and accelerated) — the publication-grade
+standard.
+
+```bash
+cli-modelarium "Q" \
+  --models gpt-5.5,claude-opus-4-7 \
+  --runs 30 \
+  --bootstrap-seed 42
+```
+
+For publication, **always set `--bootstrap-seed`**. Without a seed, CIs vary
+slightly across invocations because the bootstrap resampling is stochastic.
+
+Customise:
+
+```bash
+cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
+  --ci-level 0.99 \
+  --ci-method percentile \
+  --bootstrap-resamples 10000 \
+  --bootstrap-seed 42
+```
+
+Disable entirely:
+
+```bash
+cli-modelarium "Q" --models gpt-5.5,claude --runs 30 --no-confidence-intervals
+```
+
+### Paired tests for same-prompt comparisons (v0.1.3)
+
+When the same prompts are run on multiple models, **paired** tests have more
+statistical power than independent-sample tests because they exploit the
+within-prompt correlation. Pick `paired-t` for roughly-normal score
+differences and `wilcoxon-signed` for ordinal or non-normal data.
+
+```bash
+cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
+  --significance-test paired-t
+```
+
+```bash
+cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
+  --significance-test wilcoxon-signed
+```
+
+Paired tests automatically align observations by `run_index`, so they handle
+asymmetric failures correctly (if model A succeeded runs `[0,1,2,4,5]` and
+model B succeeded `[0,1,3,4,5]`, only the intersection `[0,1,4,5]` is used).
+
+### McNemar's test for hallucination significance (v0.1.3)
+
+When `--check-hallucination` is set with `--runs > 1` and 2+ models, McNemar's
+test automatically compares hallucination pass/fail outcomes between every
+pair of models. The implementation uses the exact binomial test for small
+discordant counts (`n_discordant < 25`) and Edwards continuity-corrected
+chi-square otherwise.
+
+```bash
+cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
+  --check-hallucination --expected-facts facts.txt \
+  --bootstrap-seed 42
+```
+
+The output adds a "Binary Outcome Significance (McNemar)" block alongside the
+standard significance tests.
+
 ### Batch evaluation with assertions
 
 Create `eval.json`:
