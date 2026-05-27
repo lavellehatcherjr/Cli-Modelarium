@@ -1,4 +1,5 @@
 """Small helpers shared across provider modules."""
+
 from __future__ import annotations
 
 from typing import Any
