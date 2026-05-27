@@ -13,6 +13,7 @@ provider inherits from `OpenAIProvider` and overrides only:
 Streaming, system prompts, and on_chunk callbacks all work without further
 overrides via the inherited OpenAIProvider behaviour.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -29,9 +30,7 @@ class LocalProvider(OpenAIProvider):
 
     name: str = "local"
     DEFAULT_URL: str = "http://localhost:11434/v1"
-    LOCAL_HOSTS: frozenset[str] = frozenset(
-        {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
-    )
+    LOCAL_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
     DUMMY_API_KEY: str = "not-required"
     DISCOVERY_TIMEOUT_SECONDS: float = 5.0
 
@@ -61,10 +60,13 @@ class LocalProvider(OpenAIProvider):
         if parsed.hostname not in cls.LOCAL_HOSTS:
             allowed = ", ".join(sorted(cls.LOCAL_HOSTS))
             raise LocalURLError(
-                f"Local URL must point to localhost (got hostname {parsed.hostname!r} in {url!r}).\n"
+                f"Local URL must point to localhost "
+                f"(got hostname {parsed.hostname!r} in {url!r}).\n"
                 f"  Allowed hostnames: {allowed}\n"
-                f"  For remote OpenAI-compatible endpoints, use a real provider integration,\n"
-                f"  not the local provider - this guard prevents accidental data leakage."
+                f"  For remote OpenAI-compatible endpoints, use a real "
+                f"provider integration,\n"
+                f"  not the local provider - this guard prevents accidental "
+                f"data leakage."
             )
         return url
 
