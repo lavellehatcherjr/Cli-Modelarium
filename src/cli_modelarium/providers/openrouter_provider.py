@@ -9,6 +9,7 @@ API. They expect two extra headers identifying the calling application:
 We pass these as `default_headers` on the AsyncOpenAI client so they go on
 every request without per-call wiring.
 """
+
 from __future__ import annotations
 
 from cli_modelarium.providers.openai_provider import OpenAIProvider
