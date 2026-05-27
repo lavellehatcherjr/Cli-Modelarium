@@ -11,6 +11,7 @@ Notes on the SDK layout in mistralai 2.4.7:
     attribute is the OpenAI-style `CompletionChunk` with the usual
     `choices[0].delta.content` shape.
 """
+
 from __future__ import annotations
 
 import time
@@ -39,9 +40,7 @@ class MistralProvider(BaseProvider):
     def __init__(self, api_key: str) -> None:
         self.client = Mistral(api_key=api_key)
 
-    def _build_messages(
-        self, prompt: str, system_prompt: str | None
-    ) -> list[dict[str, str]]:
+    def _build_messages(self, prompt: str, system_prompt: str | None) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
