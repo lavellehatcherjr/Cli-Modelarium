@@ -1,0 +1,102 @@
+Cli Modelarium
+Copyright 2026 Lavelle Hatcher Jr
+
+This product includes software developed by Lavelle Hatcher Jr.
+
+Licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the LICENSE file at the root
+of this repository, or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+
+================================================================================
+Third-Party Software Attribution
+================================================================================
+
+This software uses the following third-party open-source libraries. Each
+library is governed by its own license terms. License texts are available
+on the Python Package Index (https://pypi.org/) or in each installed
+package's distribution.
+
+
+Python SDK Dependencies
+-----------------------
+
+openai (Apache License 2.0)
+  Copyright OpenAI
+
+anthropic (MIT License)
+  Copyright Anthropic, PBC
+
+google-genai (Apache License 2.0)
+  Copyright Google LLC
+
+mistralai (Apache License 2.0)
+  Copyright Mistral AI
+
+
+Supporting Libraries
+--------------------
+
+httpx (BSD 3-Clause License)
+  Copyright Encode OSS Ltd.
+
+click (BSD 3-Clause License)
+  Copyright Pallets
+
+rich (MIT License)
+  Copyright Will McGugan
+
+keyring (MIT License)
+  Copyright Jason R. Coombs
+
+scipy (BSD 3-Clause License)
+  Copyright (c) 2001-2002 Enthought, Inc.
+  Copyright (c) 2003-2026, SciPy Developers
+  All rights reserved.
+
+numpy (BSD 3-Clause License)
+  Copyright (c) 2005-2026, NumPy Developers
+  All rights reserved.
+  (Installed as a transitive dependency of scipy.)
+
+
+Bundled Native Libraries
+------------------------
+
+The numpy and scipy wheels distributed via PyPI bundle several
+native libraries. Their licenses apply only when these binary
+distributions are installed.
+
+OpenBLAS (BSD 3-Clause License with Attribution)
+  Copyright (c) 2011-2026, The OpenBLAS Project
+  Bundled with numpy/scipy wheels for optimized linear algebra.
+
+LAPACK (modified BSD 3-Clause License with Attribution)
+  Copyright (c) 1992-2026, The University of Tennessee and
+                           The University of Tennessee Research
+                           Foundation; The Regents of the
+                           University of California; The
+                           University of Colorado Denver
+  Bundled with numpy/scipy wheels.
+
+libquadmath (LGPL-2.1-or-later)
+  Copyright (c) Free Software Foundation
+  Bundled with numpy/scipy wheels on some platforms.
+  Linked dynamically; not statically incorporated.
+
+
+Optional Dependencies
+---------------------
+
+These are installed only when specific extras are requested.
+
+jsonschema (MIT License)
+  Installed via: pip install cli-modelarium[schema]
+  Copyright Julian Berman
+
+
+================================================================================
+End of NOTICE
+================================================================================
