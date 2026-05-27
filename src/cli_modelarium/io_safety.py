@@ -21,6 +21,7 @@ If you ever want to restrict paths (e.g. a "must be inside repo root" check
 for batch mode CI workflows), add it on top - don't bake it in here, because
 this module is shared by every command that loads a user file.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
