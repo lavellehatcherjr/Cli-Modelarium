@@ -15,11 +15,12 @@ check function so:
     a) tests can simulate a missing install with monkeypatch
     b) users who don't need schema validation don't pay the import cost
 """
+
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -99,30 +100,22 @@ def parse_assertion_config(raw: Any) -> AssertionConfig:
     """
     if not isinstance(raw, dict):
         raise AssertionConfigError(
-            f"Assertion config must be an object, got "
-            f"{type(raw).__name__}: {raw!r}"
+            f"Assertion config must be an object, got {type(raw).__name__}: {raw!r}"
         )
 
     raw_type = raw.get("type")
     if raw_type is None:
-        raise AssertionConfigError(
-            f"Assertion config missing required 'type' field: {raw!r}"
-        )
+        raise AssertionConfigError(f"Assertion config missing required 'type' field: {raw!r}")
     if not isinstance(raw_type, str):
         raise AssertionConfigError(
-            f"Assertion 'type' must be a string, got "
-            f"{type(raw_type).__name__}: {raw!r}"
+            f"Assertion 'type' must be a string, got {type(raw_type).__name__}: {raw!r}"
         )
     if raw_type not in _ASSERTION_VALUES:
         supported = ", ".join(sorted(_ASSERTION_VALUES))
-        raise AssertionConfigError(
-            f"Unknown assertion type {raw_type!r}. Supported: {supported}"
-        )
+        raise AssertionConfigError(f"Unknown assertion type {raw_type!r}. Supported: {supported}")
 
     if raw_type not in _NO_VALUE_TYPES and "value" not in raw:
-        raise AssertionConfigError(
-            f"Assertion type {raw_type!r} requires a 'value' field: {raw!r}"
-        )
+        raise AssertionConfigError(f"Assertion type {raw_type!r} requires a 'value' field: {raw!r}")
 
     case_sensitive_raw = raw.get("case_sensitive", True)
     case_sensitive = bool(case_sensitive_raw)
@@ -154,9 +147,7 @@ def run_assertions(
         try:
             config = parse_assertion_config(raw)
         except AssertionConfigError as e:
-            raw_type = (
-                raw.get("type", "<unknown>") if isinstance(raw, dict) else "<unknown>"
-            )
+            raw_type = raw.get("type", "<unknown>") if isinstance(raw, dict) else "<unknown>"
             results.append(
                 AssertionResult(
                     type=str(raw_type),
@@ -280,11 +271,7 @@ def _check_contains(
         passed=found,
         expected=value,
         actual="found" if found else "not found",
-        message=(
-            f"contains {value!r}"
-            if found
-            else f"output does not contain {value!r}"
-        ),
+        message=(f"contains {value!r}" if found else f"output does not contain {value!r}"),
     )
 
 
@@ -331,11 +318,7 @@ def _check_regex(
         passed=match is not None,
         expected=pattern,
         actual=(match.group(0)[:80] if match else "no match"),
-        message=(
-            f"regex {pattern!r} matched"
-            if match
-            else f"regex {pattern!r} did not match"
-        ),
+        message=(f"regex {pattern!r} matched" if match else f"regex {pattern!r} did not match"),
     )
 
 
@@ -354,11 +337,7 @@ def _check_equals(
         passed=passed,
         expected=value,
         actual=actual_norm[:200],
-        message=(
-            f"output equals expected"
-            if passed
-            else f"output does not equal expected"
-        ),
+        message=("output equals expected" if passed else "output does not equal expected"),
     )
 
 
@@ -532,9 +511,7 @@ def _check_max_length_chars(
         expected=limit,
         actual=actual,
         message=(
-            f"{actual} chars (max {limit})"
-            if passed
-            else f"{actual} chars exceeds max {limit}"
+            f"{actual} chars (max {limit})" if passed else f"{actual} chars exceeds max {limit}"
         ),
     )
 
