@@ -9,6 +9,7 @@ API quirks compared to OpenAI-style providers:
     - Usage data is on the chunk's `usage_metadata` (with field names like
       `prompt_token_count` rather than OpenAI's `prompt_tokens`).
 """
+
 from __future__ import annotations
 
 import time
@@ -36,9 +37,7 @@ class GoogleProvider(BaseProvider):
     def __init__(self, api_key: str) -> None:
         self.client = genai.Client(api_key=api_key)
 
-    def _build_config(
-        self, temperature: float, system_prompt: str | None
-    ) -> dict[str, Any]:
+    def _build_config(self, temperature: float, system_prompt: str | None) -> dict[str, Any]:
         config: dict[str, Any] = {"temperature": temperature}
         if system_prompt:
             config["system_instruction"] = system_prompt
