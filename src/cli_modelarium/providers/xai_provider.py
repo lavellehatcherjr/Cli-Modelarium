@@ -1,4 +1,5 @@
 """xAI (Grok) provider - uses the OpenAI SDK with a different base URL."""
+
 from __future__ import annotations
 
 from cli_modelarium.providers.openai_provider import OpenAIProvider
