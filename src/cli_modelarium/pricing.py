@@ -12,6 +12,7 @@ Schema per entry:
     provider      - provider name matching BaseProvider.name (required)
     is_local      - True for local models (optional; always free)
 """
+
 from __future__ import annotations
 
 from cli_modelarium.exceptions import UnknownModelError
@@ -37,14 +38,32 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "provider": "openai"},
     "gpt-4o": {"input": 2.50, "output": 10.00, "provider": "openai"},
     "gpt-4o-mini": {"input": 0.15, "output": 0.60, "provider": "openai"},
-
     # ===== Anthropic =====
     # Verified against Anthropic's pricing page May 25, 2026.
-    "claude-opus-4-7": {"input": 5.00, "output": 25.00, "cached_input": 0.50, "provider": "anthropic"},
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00, "cached_input": 0.30, "provider": "anthropic"},
-    "claude-haiku-4-5": {"input": 1.00, "output": 5.00, "cached_input": 0.10, "provider": "anthropic"},
-    "claude-opus-4-6": {"input": 5.00, "output": 25.00, "cached_input": 0.50, "provider": "anthropic"},
-
+    "claude-opus-4-7": {
+        "input": 5.00,
+        "output": 25.00,
+        "cached_input": 0.50,
+        "provider": "anthropic",
+    },
+    "claude-sonnet-4-6": {
+        "input": 3.00,
+        "output": 15.00,
+        "cached_input": 0.30,
+        "provider": "anthropic",
+    },
+    "claude-haiku-4-5": {
+        "input": 1.00,
+        "output": 5.00,
+        "cached_input": 0.10,
+        "provider": "anthropic",
+    },
+    "claude-opus-4-6": {
+        "input": 5.00,
+        "output": 25.00,
+        "cached_input": 0.50,
+        "provider": "anthropic",
+    },
     # ===== Google Gemini (Google uses dots in model IDs) =====
     "gemini-3.5-flash": {"input": 0.50, "output": 3.00, "provider": "google"},
     "gemini-3.1-pro": {"input": 1.25, "output": 5.00, "cached_input": 0.625, "provider": "google"},
@@ -52,21 +71,38 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     "gemini-3-flash": {"input": 0.30, "output": 2.50, "provider": "google"},
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "provider": "google"},
     "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40, "provider": "google"},
-
     # ===== xAI Grok (xAI uses dots in model IDs) =====
     "grok-4.3": {"input": 1.25, "output": 2.50, "cached_input": 0.20, "provider": "xai"},
     "grok-4.20": {"input": 2.00, "output": 6.00, "cached_input": 0.20, "provider": "xai"},
-    "grok-4.20-multi-agent-beta": {"input": 2.00, "output": 6.00, "cached_input": 0.20, "provider": "xai"},
+    "grok-4.20-multi-agent-beta": {
+        "input": 2.00,
+        "output": 6.00,
+        "cached_input": 0.20,
+        "provider": "xai",
+    },
     "grok-4.1-fast": {"input": 0.20, "output": 0.50, "cached_input": 0.05, "provider": "xai"},
-    "grok-build-0.1": {"input": 1.00, "output": 4.00, "cached_input": 0.20, "provider": "xai"},
-
+    "grok-build-0.1": {"input": 1.00, "output": 2.00, "cached_input": 0.20, "provider": "xai"},
     # ===== DeepSeek =====
-    "deepseek-v4-pro": {"input": 0.55, "output": 2.19, "cached_input": 0.055, "provider": "deepseek"},
-    "deepseek-v4-flash": {"input": 0.27, "output": 1.10, "cached_input": 0.027, "provider": "deepseek"},
+    "deepseek-v4-pro": {
+        "input": 0.55,
+        "output": 2.19,
+        "cached_input": 0.055,
+        "provider": "deepseek",
+    },
+    "deepseek-v4-flash": {
+        "input": 0.27,
+        "output": 1.10,
+        "cached_input": 0.027,
+        "provider": "deepseek",
+    },
     # Legacy aliases - deprecating July 24, 2026; kept for backward compatibility.
     "deepseek-chat": {"input": 0.27, "output": 1.10, "cached_input": 0.027, "provider": "deepseek"},
-    "deepseek-reasoner": {"input": 0.27, "output": 1.10, "cached_input": 0.027, "provider": "deepseek"},
-
+    "deepseek-reasoner": {
+        "input": 0.27,
+        "output": 1.10,
+        "cached_input": 0.027,
+        "provider": "deepseek",
+    },
     # ===== Mistral =====
     "mistral-medium-3.5": {"input": 0.40, "output": 2.00, "provider": "mistral"},
     "mistral-medium-latest": {"input": 0.40, "output": 2.00, "provider": "mistral"},
@@ -75,13 +111,15 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     "codestral-latest": {"input": 0.30, "output": 0.90, "provider": "mistral"},
     "magistral-medium-latest": {"input": 2.00, "output": 5.00, "provider": "mistral"},
     "magistral-small-latest": {"input": 0.50, "output": 1.50, "provider": "mistral"},
-
     # ===== Groq =====
     "llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79, "provider": "groq"},
     "openai/gpt-oss-120b": {"input": 0.30, "output": 0.60, "provider": "groq"},
     "openai/gpt-oss-safeguard-20b": {"input": 0.10, "output": 0.30, "provider": "groq"},
-    "meta-llama/llama-4-scout-17b-16e-instruct": {"input": 0.20, "output": 0.30, "provider": "groq"},
-
+    "meta-llama/llama-4-scout-17b-16e-instruct": {
+        "input": 0.20,
+        "output": 0.30,
+        "provider": "groq",
+    },
     # ===== OpenRouter =====
     # OpenRouter aggregates 315+ models behind one API. We register a few
     # representative entries here; users can pass any OpenRouter model ID and
@@ -92,10 +130,13 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     "qwen/qwen3.6-flash": {"input": 0.19, "output": 1.13, "provider": "openrouter"},
     "qwen/qwen3-coder:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
     "deepseek/deepseek-r1:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
-    "meta-llama/llama-3-3-70b-instruct:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
+    "meta-llama/llama-3-3-70b-instruct:free": {
+        "input": 0.0,
+        "output": 0.0,
+        "provider": "openrouter",
+    },
     "openai/gpt-oss-120b:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
     "zhipuai/glm-4.7-flash:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
-
     # ===== Local =====
     # Wildcard entry. Any model with `local/` prefix resolves here and costs $0.
     "local/*": {"input": 0.0, "output": 0.0, "provider": "local", "is_local": True},
@@ -136,8 +177,7 @@ def calculate_cost(
     pricing = PRICING.get(model)
     if pricing is None:
         raise UnknownModelError(
-            f"Unknown model: {model}. "
-            f"Run `cli-modelarium list-models` to see supported models."
+            f"Unknown model: {model}. Run `cli-modelarium list-models` to see supported models."
         )
 
     cached_tokens = max(0, min(cached_tokens, input_tokens))
@@ -156,7 +196,4 @@ def calculate_cost(
 
 def pricing_freshness_note() -> str:
     """Return the standard pricing-freshness disclaimer for user-facing output."""
-    return (
-        f"Note: Pricing data as of {PRICING_AS_OF}. "
-        f"Verify current pricing at provider websites."
-    )
+    return f"Note: Pricing data as of {PRICING_AS_OF}. Verify current pricing at provider websites."
