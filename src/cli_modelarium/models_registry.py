@@ -1,4 +1,5 @@
 """Model registry: maps model IDs to providers and defines group shortcuts."""
+
 from __future__ import annotations
 
 from cli_modelarium.exceptions import UnknownModelError
@@ -81,8 +82,7 @@ def get_provider_for_model(model: str) -> str:
     pricing = PRICING.get(model)
     if pricing is None:
         raise UnknownModelError(
-            f"Unknown model: {model}. "
-            f"Run `cli-modelarium list-models` to see supported models."
+            f"Unknown model: {model}. Run `cli-modelarium list-models` to see supported models."
         )
     return str(pricing["provider"])
 
