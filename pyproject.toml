@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cli-modelarium"
-version = "0.1.2"
+version = "0.1.3"
 description = "LLM comparison CLI for terminal-first developers. Compare 8 providers (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Groq, OpenRouter) + local Ollama/LM Studio side-by-side with parallel streaming, batch eval, LLM-as-judge, hallucination detection, assertions for CI/CD."
 readme = "README.md"
 license = { file = "LICENSE" }
