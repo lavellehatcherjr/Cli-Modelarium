@@ -191,17 +191,39 @@ def _assertion_failed_types_cell(r: BatchResult) -> str:
 # ===== CSV =====
 
 
-def _format_csv(results: list[BatchResult], runs: int = 1) -> str:
+def _format_csv(
+    results: list[BatchResult],
+    runs: int = 1,
+    stats_by_cell_cis: dict | None = None,
+) -> str:
     """Build the full CSV text. Output field newlines are escaped to literal \\n
     so cells don't break spreadsheet imports.
 
     When `runs > 1` an additional `run_index` column is appended to every
     row. When `runs == 1` (the default) the column set is byte-identical
     to v0.1.0.
+
+    v0.1.3: when `stats_by_cell_cis` is provided, additional CI columns
+    are appended to each row matching the row's model. When CIs are
+    absent (None), the column set is byte-identical to v0.1.2.
     """
     fieldnames = list(CSV_COLUMNS)
     if runs > 1:
         fieldnames.append("run_index")
+
+    ci_metrics: list[str] = []
+    if stats_by_cell_cis:
+        # Determine which metric CIs are present across all models
+        # (deterministic order: latency_ms, output_tokens, cost_usd, score).
+        present: set[str] = set()
+        for metrics in stats_by_cell_cis.values():
+            present.update(metrics.keys())
+        for m in ("latency_ms", "output_tokens", "cost_usd", "score"):
+            if m in present:
+                ci_metrics.append(m)
+                fieldnames.append(f"{m}_ci_low")
+                fieldnames.append(f"{m}_ci_high")
+
     buf = io.StringIO(newline="")
     writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
@@ -231,13 +253,29 @@ def _format_csv(results: list[BatchResult], runs: int = 1) -> str:
         }
         if runs > 1:
             row["run_index"] = r.run_index
+        if ci_metrics and stats_by_cell_cis:
+            model_cis = stats_by_cell_cis.get(r.model, {})
+            for m in ci_metrics:
+                ci = model_cis.get(m)
+                row[f"{m}_ci_low"] = _none_or(ci["ci_low"]) if ci else ""
+                row[f"{m}_ci_high"] = _none_or(ci["ci_high"]) if ci else ""
         writer.writerow(row)
     return buf.getvalue()
 
 
-def write_csv(results: list[BatchResult], output_path: Path, runs: int = 1) -> None:
+def write_csv(
+    results: list[BatchResult],
+    output_path: Path,
+    runs: int = 1,
+    stats_by_cell_cis: dict | None = None,
+) -> None:
     """Atomic write of `results` to `output_path` as CSV."""
-    atomic_write_bytes(output_path, _format_csv(results, runs=runs).encode("utf-8"))
+    atomic_write_bytes(
+        output_path,
+        _format_csv(results, runs=runs, stats_by_cell_cis=stats_by_cell_cis).encode(
+            "utf-8"
+        ),
+    )
 
 
 def _csv_escape(text: str) -> str:
@@ -259,6 +297,9 @@ def _format_json(
     results: list[BatchResult],
     runs: int = 1,
     significance_results: list | None = None,
+    stats_by_cell_cis: dict | None = None,
+    mcnemar_results: list | None = None,
+    methodology: dict | None = None,
 ) -> str:
     """Build the JSON payload string with metadata header + results array.
 
@@ -295,7 +336,9 @@ def _format_json(
     }
     if runs > 1:
         payload["total_runs"] = runs
-        payload["stats_by_cell"] = _build_stats_by_cell(results)
+        payload["stats_by_cell"] = _build_stats_by_cell(
+            results, stats_by_cell_cis=stats_by_cell_cis
+        )
     if has_judges:
         payload["judge_cost_usd"] = judge_cost
         payload["total_cost_usd_with_judges"] = total_cost + judge_cost
@@ -313,32 +356,71 @@ def _format_json(
         payload["pass_rate"] = total_passed / total_definitive if total_definitive else 1.0
     if significance_results:
         payload["significance_tests"] = [
+            _significance_result_to_dict(r) for r in significance_results
+        ]
+    if mcnemar_results:
+        payload["mcnemar_tests"] = [
             {
                 "model_a": r.model_a,
                 "model_b": r.model_b,
                 "metric": r.metric,
-                "n_a": r.n_a,
-                "n_b": r.n_b,
-                "mean_a": r.mean_a,
-                "mean_b": r.mean_b,
-                "stdev_a": r.stdev_a,
-                "stdev_b": r.stdev_b,
-                "test_used": r.test_used,
-                "test_statistic": r.test_statistic,
-                "degrees_of_freedom": r.degrees_of_freedom,
+                "both_pass": r.both_pass,
+                "a_pass_b_fail": r.a_pass_b_fail,
+                "a_fail_b_pass": r.a_fail_b_pass,
+                "both_fail": r.both_fail,
+                "n_discordant": r.n_discordant,
+                "a_pass_rate": r.a_pass_rate,
+                "b_pass_rate": r.b_pass_rate,
+                "chi2_statistic": r.chi2_statistic,
                 "p_value": r.p_value,
                 "p_value_corrected": r.p_value_corrected,
                 "correction_method": r.correction_method,
                 "n_comparisons": r.n_comparisons,
-                "effect_size": r.effect_size,
-                "effect_size_metric": "cohens_d",
-                "effect_size_interpretation": r.effect_size_interpretation,
                 "threshold": r.threshold,
                 "significant_at_threshold": r.significant_at_threshold,
+                "method": r.method,
             }
-            for r in significance_results
+            for r in mcnemar_results
         ]
+    if methodology is not None:
+        payload["methodology"] = methodology
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _significance_result_to_dict(r: Any) -> dict[str, Any]:
+    """Serialize a SignificanceResult (v0.1.2 + v0.1.3 optional fields)."""
+    out: dict[str, Any] = {
+        "model_a": r.model_a,
+        "model_b": r.model_b,
+        "metric": r.metric,
+        "n_a": r.n_a,
+        "n_b": r.n_b,
+        "mean_a": r.mean_a,
+        "mean_b": r.mean_b,
+        "stdev_a": r.stdev_a,
+        "stdev_b": r.stdev_b,
+        "test_used": r.test_used,
+        "test_statistic": r.test_statistic,
+        "degrees_of_freedom": r.degrees_of_freedom,
+        "p_value": r.p_value,
+        "p_value_corrected": r.p_value_corrected,
+        "correction_method": r.correction_method,
+        "n_comparisons": r.n_comparisons,
+        "effect_size": r.effect_size,
+        "effect_size_metric": "cohens_d",
+        "effect_size_interpretation": r.effect_size_interpretation,
+        "threshold": r.threshold,
+        "significant_at_threshold": r.significant_at_threshold,
+    }
+    # v0.1.3 optional fields: only add when populated (preserves v0.1.2 schema
+    # when CIs were not requested).
+    if r.effect_size_ci_low is not None or r.effect_size_ci_high is not None:
+        out["effect_size_ci_low"] = r.effect_size_ci_low
+        out["effect_size_ci_high"] = r.effect_size_ci_high
+        out["bootstrap_method"] = r.bootstrap_method
+        out["bootstrap_resamples"] = r.bootstrap_resamples
+        out["bootstrap_seed"] = r.bootstrap_seed
+    return out
 
 
 def write_json(
@@ -346,17 +428,28 @@ def write_json(
     output_path: Path,
     runs: int = 1,
     significance_results: list | None = None,
+    stats_by_cell_cis: dict | None = None,
+    mcnemar_results: list | None = None,
+    methodology: dict | None = None,
 ) -> None:
     """Atomic write of `results` to `output_path` as JSON."""
     atomic_write_bytes(
         output_path,
         _format_json(
-            results, runs=runs, significance_results=significance_results
+            results,
+            runs=runs,
+            significance_results=significance_results,
+            stats_by_cell_cis=stats_by_cell_cis,
+            mcnemar_results=mcnemar_results,
+            methodology=methodology,
         ).encode("utf-8"),
     )
 
 
-def _build_stats_by_cell(results: list[BatchResult]) -> list[dict[str, Any]]:
+def _build_stats_by_cell(
+    results: list[BatchResult],
+    stats_by_cell_cis: dict | None = None,
+) -> list[dict[str, Any]]:
     """Aggregate per-cell stats for JSON output when runs > 1.
 
     A "cell" is the (model, temperature, system) tuple. Iteration order
@@ -399,25 +492,40 @@ def _build_stats_by_cell(results: list[BatchResult]) -> list[dict[str, Any]]:
         else:
             mode_output, mode_count = None, 0
 
-        out.append(
-            {
-                "model": model,
-                "temperature": temp,
-                "system": sp,
-                "n_runs": len(cell),
-                "n_succeeded": n_succeeded,
-                "n_failed": n_failed,
-                "latency_mean_ms": _safe_mean(latencies),
-                "latency_stdev_ms": stdev,
-                "latency_cv": cv,
-                "output_tokens_mean": _safe_mean(token_counts) if token_counts else None,
-                "cost_total_usd": sum(costs),
-                "unique_outputs": unique,
-                "mode_output": mode_output,
-                "mode_count": mode_count,
-                "output_diversity": (unique / n_succeeded) if n_succeeded else 0.0,
-            }
-        )
+        cell_dict: dict[str, Any] = {
+            "model": model,
+            "temperature": temp,
+            "system": sp,
+            "n_runs": len(cell),
+            "n_succeeded": n_succeeded,
+            "n_failed": n_failed,
+            "latency_mean_ms": _safe_mean(latencies),
+            "latency_stdev_ms": stdev,
+            "latency_cv": cv,
+            "output_tokens_mean": _safe_mean(token_counts) if token_counts else None,
+            "cost_total_usd": sum(costs),
+            "unique_outputs": unique,
+            "mode_output": mode_output,
+            "mode_count": mode_count,
+            "output_diversity": (unique / n_succeeded) if n_succeeded else 0.0,
+        }
+        # v0.1.3: inject CI fields when the caller provided them. Keys are
+        # additive so v0.1.2 consumers see the same shape when CIs are off.
+        if stats_by_cell_cis:
+            model_cis = stats_by_cell_cis.get(model, {})
+            for metric_name, json_prefix in (
+                ("latency_ms", "latency_mean_ms"),
+                ("output_tokens", "output_tokens_mean"),
+                ("cost_usd", "cost_mean_usd"),
+                ("score", "score_mean"),
+            ):
+                ci = model_cis.get(metric_name)
+                if ci is None:
+                    continue
+                cell_dict[f"{json_prefix}_ci_low"] = ci["ci_low"]
+                cell_dict[f"{json_prefix}_ci_high"] = ci["ci_high"]
+                cell_dict[f"{json_prefix}_ci_level"] = ci["ci_level"]
+        out.append(cell_dict)
     return out
 
 
@@ -495,7 +603,14 @@ def _result_to_dict(r: BatchResult, include_run_index: bool = False) -> dict[str
 # ===== Markdown =====
 
 
-def _format_markdown(results: list[BatchResult], runs: int = 1) -> str:
+def _format_markdown(
+    results: list[BatchResult],
+    runs: int = 1,
+    significance_results: list | None = None,
+    stats_by_cell_cis: dict | None = None,
+    mcnemar_results: list | None = None,
+    methodology: dict | None = None,
+) -> str:
     """Render results as Markdown grouped by prompt_id.
 
     Each prompt gets its own H2 section with a sub-table of
@@ -505,6 +620,9 @@ def _format_markdown(results: list[BatchResult], runs: int = 1) -> str:
     When `runs > 1`, a "Per-cell statistical summary" section is appended
     after the per-prompt sections. When `runs == 1`, the output is
     byte-identical to v0.1.0.
+
+    v0.1.3: when CIs / significance / McNemar / methodology are provided,
+    extra sections are appended; otherwise output is byte-identical to v0.1.2.
     """
     if not results:
         return (
@@ -682,19 +800,189 @@ def _format_markdown(results: list[BatchResult], runs: int = 1) -> str:
         )
         lines.append("")
 
+    # v0.1.3: append CI, significance, McNemar, and methodology sections.
+    if stats_by_cell_cis:
+        ci_lines = _markdown_ci_section(stats_by_cell_cis)
+        if ci_lines:
+            lines.extend(ci_lines)
+
+    if significance_results:
+        sig_lines = _markdown_significance_section(significance_results)
+        if sig_lines:
+            lines.extend(sig_lines)
+
+    if mcnemar_results:
+        mc_lines = _markdown_mcnemar_section(mcnemar_results)
+        if mc_lines:
+            lines.extend(mc_lines)
+
+    if methodology is not None:
+        meth_lines = _markdown_methodology_section(methodology)
+        if meth_lines:
+            lines.extend(meth_lines)
+
     return "\n".join(lines)
 
 
-def write_markdown(results: list[BatchResult], output_path: Path, runs: int = 1) -> None:
+def _markdown_ci_section(stats_by_cell_cis: dict) -> list[str]:
+    """Build the bootstrap CI Markdown section."""
+    if not any(metrics for metrics in stats_by_cell_cis.values()):
+        return []
+    out = ["## Bootstrap confidence intervals", ""]
+    out.append("| Model | Metric | Point estimate | CI low | CI high | CI level |")
+    out.append("|---|---|---:|---:|---:|---:|")
+    for model, metrics in stats_by_cell_cis.items():
+        for metric_name in ("latency_ms", "score", "output_tokens", "cost_usd"):
+            ci = metrics.get(metric_name)
+            if ci is None:
+                continue
+            level_pct = f"{int(round(ci['ci_level'] * 100))}%"
+            out.append(
+                f"| `{model}` | {metric_name} | - "
+                f"| {ci['ci_low']:.4f} | {ci['ci_high']:.4f} | {level_pct} |"
+            )
+    out.append("")
+    return out
+
+
+def _markdown_significance_section(significance_results: list) -> list[str]:
+    """Build the pairwise significance Markdown section."""
+    if not significance_results:
+        return []
+    first = significance_results[0]
+    out = [
+        "## Statistical significance tests",
+        "",
+        f"- Metric: `{first.metric}`",
+        f"- Test: `{first.test_used}`",
+        f"- Correction: `{first.correction_method}`",
+        f"- Threshold: `p < {first.threshold}`",
+        "",
+        "| Model A | Model B | Mean A | Mean B | p (raw) "
+        "| p (corrected) | Cohen's d | Significant |",
+        "|---|---|---:|---:|---:|---:|---:|:---:|",
+    ]
+    for r in significance_results:
+        p_raw = f"{r.p_value:.4f}" if r.p_value is not None else "-"
+        p_corr = (
+            f"{r.p_value_corrected:.4f}" if r.p_value_corrected is not None else "-"
+        )
+        d_str = (
+            f"{r.effect_size:.3f} ({r.effect_size_interpretation})"
+            if r.effect_size is not None
+            else "-"
+        )
+        sig = "✓" if r.significant_at_threshold else ""
+        out.append(
+            f"| `{r.model_a}` | `{r.model_b}` "
+            f"| {r.mean_a:.4f} | {r.mean_b:.4f} "
+            f"| {p_raw} | {p_corr} | {d_str} | {sig} |"
+        )
+    out.append("")
+    return out
+
+
+def _markdown_mcnemar_section(mcnemar_results: list) -> list[str]:
+    """Build the McNemar Markdown section."""
+    if not mcnemar_results:
+        return []
+    first = mcnemar_results[0]
+    out = [
+        "## Binary outcome significance (McNemar)",
+        "",
+        "- Metric: hallucination pass/fail",
+        f"- Correction: `{first.correction_method}`",
+        f"- Threshold: `p < {first.threshold}`",
+        "",
+        "| Model A | Model B | Pass rate A | Pass rate B | Discordant "
+        "| p (corrected) | Method | Significant |",
+        "|---|---|---:|---:|---:|---:|:---|:---:|",
+    ]
+    for r in mcnemar_results:
+        p_corr = (
+            f"{r.p_value_corrected:.4f}" if r.p_value_corrected is not None else "-"
+        )
+        sig = "✓" if r.significant_at_threshold else ""
+        out.append(
+            f"| `{r.model_a}` | `{r.model_b}` "
+            f"| {r.a_pass_rate:.0%} | {r.b_pass_rate:.0%} "
+            f"| {r.n_discordant} | {p_corr} | {r.method} | {sig} |"
+        )
+    out.append("")
+    return out
+
+
+def _markdown_methodology_section(methodology: dict) -> list[str]:
+    """Build the methodology metadata section."""
+    out = ["## Statistical methodology", ""]
+    out.append(f"- Tool version: `{methodology.get('tool_version', '?')}`")
+    out.append(f"- scipy version: `{methodology.get('scipy_version', '?')}`")
+    out.append(f"- Python version: `{methodology.get('python_version', '?')}`")
+    out.append(f"- Runs per cell: `{methodology.get('n_runs', '?')}`")
+    bs = methodology.get("bootstrap") or {}
+    if bs.get("enabled"):
+        out.append(
+            f"- Bootstrap: method=`{bs.get('method')}`, "
+            f"resamples=`{bs.get('n_resamples')}`, "
+            f"CI level=`{bs.get('ci_level')}`, "
+            f"seed=`{bs.get('seed')}`"
+        )
+    sig = methodology.get("significance") or {}
+    if sig.get("enabled"):
+        out.append(
+            f"- Significance test: `{sig.get('test')}`, "
+            f"correction=`{sig.get('correction')}`, "
+            f"threshold=`{sig.get('threshold')}`"
+        )
+    out.append("")
+    return out
+
+
+def write_markdown(
+    results: list[BatchResult],
+    output_path: Path,
+    runs: int = 1,
+    significance_results: list | None = None,
+    stats_by_cell_cis: dict | None = None,
+    mcnemar_results: list | None = None,
+    methodology: dict | None = None,
+) -> None:
     """Atomic write of `results` to `output_path` as Markdown."""
-    atomic_write_bytes(output_path, _format_markdown(results, runs=runs).encode("utf-8"))
+    atomic_write_bytes(
+        output_path,
+        _format_markdown(
+            results,
+            runs=runs,
+            significance_results=significance_results,
+            stats_by_cell_cis=stats_by_cell_cis,
+            mcnemar_results=mcnemar_results,
+            methodology=methodology,
+        ).encode("utf-8"),
+    )
 
 
 def render_markdown_to_console(
-    results: list[BatchResult], console: Console, runs: int = 1
+    results: list[BatchResult],
+    console: Console,
+    runs: int = 1,
+    significance_results: list | None = None,
+    stats_by_cell_cis: dict | None = None,
+    mcnemar_results: list | None = None,
+    methodology: dict | None = None,
 ) -> None:
     """Render Markdown via Rich for stdout display."""
-    console.print(Markdown(_format_markdown(results, runs=runs)))
+    console.print(
+        Markdown(
+            _format_markdown(
+                results,
+                runs=runs,
+                significance_results=significance_results,
+                stats_by_cell_cis=stats_by_cell_cis,
+                mcnemar_results=mcnemar_results,
+                methodology=methodology,
+            )
+        )
+    )
 
 
 def _assertion_summary_cell(r: BatchResult) -> str:
