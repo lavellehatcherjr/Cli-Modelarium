@@ -289,13 +289,15 @@ def main(ctx: click.Context) -> None:
 )
 @click.option(
     "--significance-test",
-    type=click.Choice(["welch", "mann-whitney"]),
+    type=click.Choice(["welch", "mann-whitney", "paired-t", "wilcoxon-signed"]),
     default="welch",
     show_default=True,
     help=(
         "Statistical test to use. 'welch' (default) handles unequal "
         "variances. 'mann-whitney' is non-parametric (no normality "
-        "assumption)."
+        "assumption). 'paired-t' uses scipy.stats.ttest_rel for "
+        "same-prompt paired comparisons (more statistical power). "
+        "'wilcoxon-signed' is the non-parametric paired alternative."
     ),
 )
 @click.option(
@@ -317,6 +319,54 @@ def main(ctx: click.Context) -> None:
     help=(
         "Metric to test for significance. Default: 'score' when --judge "
         "enabled, 'latency_ms' otherwise."
+    ),
+)
+@click.option(
+    "--confidence-intervals/--no-confidence-intervals",
+    default=None,
+    help=(
+        "Compute bootstrap confidence intervals on per-cell means. "
+        "Auto-enabled when --runs > 1. Use --no-confidence-intervals to "
+        "disable."
+    ),
+)
+@click.option(
+    "--ci-level",
+    type=click.FloatRange(0.0, 1.0, min_open=True, max_open=True),
+    default=0.95,
+    show_default=True,
+    help="Confidence level for bootstrap CIs (e.g. 0.95 for 95% CI).",
+)
+@click.option(
+    "--ci-method",
+    type=click.Choice(["bca", "percentile", "basic"]),
+    default="bca",
+    show_default=True,
+    help=(
+        "Bootstrap CI method. 'bca' (default) is bias-corrected and "
+        "accelerated - the publication-grade standard. 'percentile' is "
+        "simpler but less accurate near distribution tails. 'basic' is "
+        "the reverse-percentile method."
+    ),
+)
+@click.option(
+    "--bootstrap-resamples",
+    type=click.IntRange(min=100),
+    default=5000,
+    show_default=True,
+    help=(
+        "Number of bootstrap resamples for CI computation. "
+        "Publication standard: 5000. Faster: 1000. More accurate: 10000."
+    ),
+)
+@click.option(
+    "--bootstrap-seed",
+    type=int,
+    default=None,
+    help=(
+        "Random seed for reproducible bootstrap CIs. REQUIRED for "
+        "publication-grade output - without a seed, CIs vary slightly "
+        "across invocations."
     ),
 )
 def compare(
@@ -350,6 +400,11 @@ def compare(
     significance_test: str,
     correction: str,
     significance_metric: str | None,
+    confidence_intervals: bool | None,
+    ci_level: float,
+    ci_method: str,
+    bootstrap_resamples: int,
+    bootstrap_seed: int | None,
 ) -> None:
     """Run a side-by-side comparison of LLMs on a single prompt."""
     try:
@@ -517,18 +572,21 @@ def compare(
     else:
         should_compute_significance = significance
 
+    # v0.1.3: bootstrap CIs auto-enable when runs > 1 (matching significance
+    # pattern). User can opt out with --no-confidence-intervals.
+    if confidence_intervals is None:
+        should_compute_ci = runs > 1
+    else:
+        should_compute_ci = confidence_intervals
+
     significance_results = None
-    if should_compute_significance and runs > 1 and len(model_list) >= 2:
-        from cli_modelarium.run_statistics import compute_pairwise_significance
+    stats_by_cell_with_ci: dict | None = None
+    mcnemar_results = None
+    methodology: dict | None = None
 
-        # Resolve default metric now that we know whether judging happened.
-        sig_metric = significance_metric
-        if sig_metric is None:
-            sig_metric = "score" if judge_results is not None else "latency_ms"
-
-        # Tag each JudgeResult with its source-state id so the score-extractor
-        # can match them back. This is a private contract between cli.py and
-        # _extract_metric_samples.
+    if runs > 1 and len(model_list) >= 1:
+        # Always tag judge results with their state id so paired/score
+        # extractors can match them back.
         if judge_results is not None:
             for state, jr in zip(states, judge_results, strict=True):
                 jr._state_id = id(state)  # type: ignore[attr-defined]
@@ -537,18 +595,86 @@ def compare(
         for state in states:
             states_by_model.setdefault(state.model, []).append(state)
 
-        try:
-            significance_results = compute_pairwise_significance(
+        if should_compute_significance and len(model_list) >= 2:
+            from cli_modelarium.run_statistics import (
+                compute_significance_with_ci,
+            )
+
+            sig_metric = significance_metric
+            if sig_metric is None:
+                sig_metric = "score" if judge_results is not None else "latency_ms"
+
+            try:
+                significance_results = compute_significance_with_ci(
+                    states_by_model,
+                    judge_results,
+                    metric=sig_metric,
+                    test=significance_test,  # type: ignore[arg-type]
+                    correction=correction,  # type: ignore[arg-type]
+                    threshold=significance_threshold,
+                    compute_ci=should_compute_ci,
+                    ci_level=ci_level,
+                    ci_method=ci_method,
+                    n_resamples=bootstrap_resamples,
+                    seed=bootstrap_seed,
+                )
+            except ValueError as e:
+                console.print(f"[yellow]Significance test skipped: {e}[/yellow]")
+                significance_results = None
+
+        if should_compute_ci:
+            from cli_modelarium.run_statistics import compute_stats_with_cis
+
+            cis = compute_stats_with_cis(
                 states_by_model,
                 judge_results,
-                metric=sig_metric,
-                test=significance_test,  # type: ignore[arg-type]
+                ci_level=ci_level,
+                ci_method=ci_method,
+                n_resamples=bootstrap_resamples,
+                seed=bootstrap_seed,
+            )
+            stats_by_cell_with_ci = _flatten_cell_cis(cis)
+
+        if (
+            hallucination_config is not None
+            and len(model_list) >= 2
+            and judge_results is not None
+        ):
+            from cli_modelarium.run_statistics import compute_mcnemar_pairwise
+
+            judge_by_state_id = {
+                id(state): jr
+                for state, jr in zip(states, judge_results, strict=True)
+            }
+            mcnemar_results = compute_mcnemar_pairwise(
+                states_by_model,
+                judge_by_state_id,
                 correction=correction,  # type: ignore[arg-type]
                 threshold=significance_threshold,
             )
-        except ValueError as e:
-            console.print(f"[yellow]Significance test skipped: {e}[/yellow]")
-            significance_results = None
+
+        # Record methodology metadata for reproducibility.
+        import scipy as _scipy
+
+        methodology = {
+            "tool_version": __version__,
+            "scipy_version": _scipy.__version__,
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+            "n_runs": runs,
+            "bootstrap": {
+                "enabled": should_compute_ci,
+                "method": ci_method if should_compute_ci else None,
+                "n_resamples": bootstrap_resamples if should_compute_ci else None,
+                "ci_level": ci_level if should_compute_ci else None,
+                "seed": bootstrap_seed if should_compute_ci else None,
+            },
+            "significance": {
+                "enabled": bool(significance_results),
+                "test": significance_test if significance_results else None,
+                "correction": correction if significance_results else None,
+                "threshold": significance_threshold if significance_results else None,
+            },
+        }
 
     if output_path is not None or output_fmt is not None:
         # File or explicit-format output path: serialize via batch's writers.
@@ -559,6 +685,9 @@ def compare(
             output_fmt=output_fmt or "markdown",
             runs=runs,
             significance_results=significance_results,
+            stats_by_cell_cis=stats_by_cell_with_ci,
+            mcnemar_results=mcnemar_results,
+            methodology=methodology,
         )
     elif runs > 1:
         _display_results_with_runs(
@@ -569,6 +698,8 @@ def compare(
             hallucination_mode=hallucination_config is not None,
             hallucination_facts=(hallucination_config.facts if hallucination_config else None),
             significance_results=significance_results,
+            stats_by_cell_cis=stats_by_cell_with_ci,
+            mcnemar_results=mcnemar_results,
         )
     else:
         _display_results(
@@ -1187,6 +1318,36 @@ def _states_to_compare_results(
     return results
 
 
+def _flatten_cell_cis(
+    cis: dict,
+) -> dict:
+    """Convert {model: {metric: ConfidenceInterval}} to a flat dict keyed by
+    model for formatter consumption.
+
+    Output shape (per model):
+      {model_name: {
+        "latency_ms": {"ci_low": .., "ci_high": .., "ci_level": ..,
+                      "method": .., "n_resamples": .., "seed": ..},
+        ...
+      }}
+    """
+    out: dict = {}
+    for model, metrics in cis.items():
+        out[model] = {}
+        for metric, ci in metrics.items():
+            if ci is None:
+                continue
+            out[model][metric] = {
+                "ci_low": ci.ci_low,
+                "ci_high": ci.ci_high,
+                "ci_level": ci.ci_level,
+                "method": ci.method,
+                "n_resamples": ci.n_resamples,
+                "seed": ci.seed,
+            }
+    return out
+
+
 def _emit_batch_results(
     results: list,
     *,
@@ -1194,16 +1355,39 @@ def _emit_batch_results(
     output_fmt: str,
     runs: int = 1,
     significance_results: list | None = None,
+    stats_by_cell_cis: dict | None = None,
+    mcnemar_results: list | None = None,
+    methodology: dict | None = None,
 ) -> None:
-    """Dispatch to the right writer/renderer based on resolved format."""
+    """Dispatch to the right writer/renderer based on resolved format.
+
+    v0.1.3: significance_results, stats_by_cell_cis, mcnemar_results, and
+    methodology flow to ALL formatters (not just JSON) so CSV/Markdown
+    also render the new fields.
+    """
     if output_path is None:
         # Stdout: only markdown is rendered natively; csv/json get printed raw.
         if output_fmt == "markdown":
-            render_markdown_to_console(results, console, runs=runs)
+            render_markdown_to_console(
+                results,
+                console,
+                runs=runs,
+                significance_results=significance_results,
+                stats_by_cell_cis=stats_by_cell_cis,
+                mcnemar_results=mcnemar_results,
+                methodology=methodology,
+            )
         elif output_fmt == "csv":
             from cli_modelarium.output_formatters import _format_csv
 
-            console.print(_format_csv(results, runs=runs), end="")
+            console.print(
+                _format_csv(
+                    results,
+                    runs=runs,
+                    stats_by_cell_cis=stats_by_cell_cis,
+                ),
+                end="",
+            )
         elif output_fmt == "json":
             from cli_modelarium.output_formatters import _format_json
 
@@ -1212,6 +1396,9 @@ def _emit_batch_results(
                     results,
                     runs=runs,
                     significance_results=significance_results,
+                    stats_by_cell_cis=stats_by_cell_cis,
+                    mcnemar_results=mcnemar_results,
+                    methodology=methodology,
                 ),
                 end="",
             )
@@ -1221,16 +1408,32 @@ def _emit_batch_results(
         return
 
     if output_fmt == "csv":
-        write_csv(results, output_path, runs=runs)
+        write_csv(
+            results,
+            output_path,
+            runs=runs,
+            stats_by_cell_cis=stats_by_cell_cis,
+        )
     elif output_fmt == "json":
         write_json(
             results,
             output_path,
             runs=runs,
             significance_results=significance_results,
+            stats_by_cell_cis=stats_by_cell_cis,
+            mcnemar_results=mcnemar_results,
+            methodology=methodology,
         )
     elif output_fmt == "markdown":
-        write_markdown(results, output_path, runs=runs)
+        write_markdown(
+            results,
+            output_path,
+            runs=runs,
+            significance_results=significance_results,
+            stats_by_cell_cis=stats_by_cell_cis,
+            mcnemar_results=mcnemar_results,
+            methodology=methodology,
+        )
     else:
         _print_error(f"Unsupported output format: {output_fmt!r}")
         sys.exit(EXIT_CALL_FAILED)
@@ -1924,6 +2127,8 @@ def _display_results_with_runs(
     hallucination_mode: bool = False,
     hallucination_facts: list[str] | None = None,
     significance_results: list | None = None,
+    stats_by_cell_cis: dict | None = None,
+    mcnemar_results: list | None = None,
 ) -> None:
     """Render the runs > 1 path: one summary row per cell with RunStats.
 
@@ -2123,8 +2328,83 @@ def _display_results_with_runs(
     )
     console.print(f"[dim]{pricing_freshness_note()}[/dim]")
 
+    if stats_by_cell_cis:
+        _display_confidence_intervals(stats_by_cell_cis)
+
     if significance_results:
         _display_significance(significance_results)
+
+    if mcnemar_results:
+        _display_mcnemar(mcnemar_results)
+
+
+def _display_confidence_intervals(stats_by_cell_cis: dict) -> None:
+    """Render bootstrap CIs on per-model means below the runs table."""
+    if not stats_by_cell_cis:
+        return
+    has_any = any(metrics for metrics in stats_by_cell_cis.values())
+    if not has_any:
+        return
+
+    console.print()
+    console.print("[bold]Bootstrap Confidence Intervals[/bold]")
+    for model, metrics in stats_by_cell_cis.items():
+        if not metrics:
+            continue
+        parts: list[str] = []
+        for metric_name in ("latency_ms", "score", "output_tokens", "cost_usd"):
+            ci = metrics.get(metric_name)
+            if ci is None:
+                continue
+            label = {
+                "latency_ms": "latency",
+                "score": "score",
+                "output_tokens": "tokens",
+                "cost_usd": "cost",
+            }[metric_name]
+            level_pct = int(round(ci["ci_level"] * 100))
+            parts.append(
+                f"{label} [{level_pct}% CI: {ci['ci_low']:.3f}, {ci['ci_high']:.3f}]"
+            )
+        if parts:
+            console.print(f"  {model}: " + " | ".join(parts))
+
+
+def _display_mcnemar(mcnemar_results: list) -> None:
+    """Render McNemar test results for paired binary outcomes."""
+    if not mcnemar_results:
+        return
+
+    console.print()
+    console.print("[bold]Binary Outcome Significance (McNemar)[/bold]")
+    first = mcnemar_results[0]
+    console.print(
+        f"[dim]Metric: hallucination pass/fail | Correction: "
+        f"{first.correction_method} | Threshold: p < {first.threshold}[/dim]"
+    )
+
+    for r in mcnemar_results:
+        if r.n_discordant == 0:
+            console.print(
+                f"  {r.model_a} ({r.a_pass_rate:.0%} pass) vs "
+                f"{r.model_b} ({r.b_pass_rate:.0%} pass): "
+                f"no discordant runs (test undefined)"
+            )
+            continue
+        sig_marker = "*" if r.significant_at_threshold else ""
+        p_display = (
+            r.p_value_corrected if r.p_value_corrected is not None else r.p_value
+        )
+        method_label = {
+            "exact_binomial": "exact",
+            "edwards_chi2": "Edwards",
+        }.get(r.method, r.method)
+        console.print(
+            f"  {r.model_a} ({r.a_pass_rate:.0%} pass) vs "
+            f"{r.model_b} ({r.b_pass_rate:.0%} pass): "
+            f"p={p_display:.4f}{sig_marker} "
+            f"({method_label}, discordant={r.n_discordant})"
+        )
 
 
 def _display_significance(significance_results: list) -> None:
