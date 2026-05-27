@@ -3,11 +3,13 @@
   <img alt="cli modelarium" src="docs/assets/cli-modelarium-wordmark-light.svg" width="420">
 </picture>
 
+Read this in other languages: [日本語](README.ja.md) | [Español](README.es.md) | [Français](README.fr.md) | [한국어](README.ko.md) | [中文](README.zh.md) | [Deutsch](README.de.md) | [Português](README.pt.md) | [Italiano](README.it.md)
+
 > Compare LLM outputs side-by-side from your terminal - 8 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
 
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)](#)
 
 ## What it does
@@ -15,6 +17,13 @@
 **Cli Modelarium** is a polished command-line tool for comparing LLM outputs across providers, models, system prompts, and temperatures - with live parallel streaming, batch evaluation, deterministic testing, and quality scoring built in.
 
 Useful for evaluating which model fits your specific task, running prompt regression tests in CI/CD, comparing local models against cloud APIs, or building evaluation datasets - all from a single terminal command.
+
+## System requirements
+
+- Python 3.11 or higher (Python 3.10 users: install `cli-modelarium==0.1.1`)
+- ~150 MB disk space (including scipy and numpy)
+- macOS (Apple Silicon and Intel), Windows 10+ (x64 and ARM), Linux (x64 and ARM)
+- Internet access for the first install (PyPI wheel download)
 
 ## Quick start
 
@@ -58,7 +67,8 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ### 🧪 Evaluation features
 
-- **Deterministic assertions** - 9 assertion types (`contains`, `regex`, `json_valid`, `json_schema`, `max_length_chars`, `latency_under`, `cost_under`, and more) with pass/fail output and CI exit codes
+- **Statistical reproducibility analysis** - `--runs N` runs each configuration N times and reports mean/median/stdev/CV of latency and tokens, output frequency, mode output, and output diversity. Combine with `--check-hallucination` to measure hallucination rate across runs.
+- **Deterministic assertions** - 10 assertion types (`contains`, `regex`, `json_valid`, `json_schema`, `max_length_chars`, `latency_under`, `cost_under`, and more) with pass/fail output and CI exit codes
 - **LLM-as-a-judge scoring** - Use one LLM to score outputs from others on quality criteria
 - **Judge panels** - Multiple judges average scores for less biased evaluation
 - **Hallucination detection preset** - Ready-to-use criteria for factual accuracy checking
@@ -119,6 +129,56 @@ That's it. You'll see all three models stream their responses live in parallel, 
 ```bash
 cli-modelarium "Write a Python function to find the longest palindromic substring" \
   --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro
+```
+
+### Reproducibility analysis - run N times and see variance
+
+```bash
+cli-modelarium "What is quantum computing?" \
+  --models gpt-5.5,claude-opus-4-7 \
+  --runs 5
+```
+
+Each model gets called 5 times in parallel. The output shows mean/stdev of
+latency, coefficient of variation, mode answer, and output diversity per
+model. Combine with `--check-hallucination` and `--judge` to measure the
+hallucination rate across runs.
+
+### Statistical significance testing
+
+When you run two or more models with `--runs > 1`, cli-modelarium automatically
+computes pairwise statistical significance tests (Welch's t-test by default)
+with Bonferroni correction and Cohen's d effect sizes. The math is delegated
+to [scipy](https://scipy.org/) so results match the scientific Python ecosystem.
+
+```bash
+cli-modelarium "Solve this math problem step by step" \
+  --models gpt-5.5,claude-opus-4-7 \
+  --runs 20 \
+  --judge gemini-3.1-pro
+```
+
+The output adds a "Statistical Significance Tests" block with pairwise
+p-values (corrected), Cohen's d effect sizes, and a significance verdict at
+the chosen threshold. The default metric is the judge `score` when judging is
+on, otherwise `latency_ms`.
+
+Customise the analysis:
+
+```bash
+cli-modelarium "Q" \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
+  --runs 30 \
+  --judge mistral-large \
+  --significance-test mann-whitney \
+  --correction holm \
+  --significance-threshold 0.01
+```
+
+Opt out:
+
+```bash
+cli-modelarium "Q" --models gpt-5.5,claude --runs 10 --no-significance
 ```
 
 ### Batch evaluation with assertions
@@ -309,10 +369,11 @@ The hallucination detection preset is a useful comparison signal between models,
 LLMs are non-deterministic at temperature > 0 - re-running the same prompt may produce different outputs. A single comparison run shows you ONE sample from each model, not a definitive quality verdict.
 
 To draw more reliable conclusions:
+- Use `--runs 5` (or higher) to automatically run each comparison N times and see statistical summaries: mean/median latency, coefficient of variation, mode output, and output diversity. Coefficient of variation below 0.05 indicates stable model behavior across runs.
+- For hallucination consistency analysis, combine `--runs` with `--check-hallucination` to see how often the model produces hallucinations across multiple runs (the hallucination rate).
 - Use `--temperatures 0` for more deterministic outputs (where supported)
-- Run the same comparison 3-5 times and look for patterns
 - Compare across multiple prompts, not just one
-- Use the `--output json` flag to save runs for systematic analysis
+- Use the `--output json` flag to save runs for systematic analysis (with `--runs > 1` the JSON includes per-cell `stats_by_cell` aggregates)
 
 ## About the author
 
