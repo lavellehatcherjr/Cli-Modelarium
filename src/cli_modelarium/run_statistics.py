@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import math
 import statistics as stdlib_statistics
+import warnings
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import numpy as np
 import scipy.stats as _scipy_stats
 
 from cli_modelarium.streaming import StreamState
@@ -202,6 +205,16 @@ class SignificanceResult:
     effect_size_interpretation: str  # "negligible", "small", "medium", "large", "undefined"
     threshold: float  # User-specified significance threshold
     significant_at_threshold: bool  # corrected p < threshold
+
+    # v0.1.3 additions - all optional to preserve v0.1.2 backward compat (F2).
+    # When None, the field was not requested or could not be computed.
+    bootstrap_ci_low: float | None = None
+    bootstrap_ci_high: float | None = None
+    bootstrap_method: str | None = None  # "bca", "percentile", "basic"
+    bootstrap_resamples: int | None = None
+    bootstrap_seed: int | None = None
+    effect_size_ci_low: float | None = None
+    effect_size_ci_high: float | None = None
 
 
 def cohens_d(sample_a: list[float], sample_b: list[float]) -> float | None:
@@ -397,7 +410,9 @@ def compute_pairwise_significance(
     judge_results: list[Any] | None,
     *,
     metric: str = "latency_ms",
-    test: Literal["welch", "mann-whitney"] = "welch",
+    test: Literal[
+        "welch", "mann-whitney", "paired-t", "wilcoxon-signed"
+    ] = "welch",
     correction: Literal["none", "bonferroni", "holm"] = "bonferroni",
     threshold: float = 0.05,
 ) -> list[SignificanceResult]:
@@ -406,6 +421,16 @@ def compute_pairwise_significance(
     Returns one SignificanceResult per unordered (model_a, model_b) pair.
     Pair order follows insertion order in states_by_model so output is
     deterministic.
+
+    Tests:
+      - "welch": Welch's t-test (independent samples, unequal variances)
+      - "mann-whitney": Mann-Whitney U (non-parametric, independent)
+      - "paired-t": paired t-test (same prompts, requires run_index alignment)
+      - "wilcoxon-signed": Wilcoxon signed-rank (non-parametric, paired)
+
+    For paired tests, samples are aligned by run_index so position i on
+    model A matches position i on model B by the same original run, even
+    when failures are asymmetric.
 
     Edge cases:
       - n < 3 in either group: test_used="insufficient_samples", p=None
@@ -417,7 +442,20 @@ def compute_pairwise_significance(
     if len(models) < 2:
         return []
 
-    samples_by_model = _extract_metric_samples(states_by_model, judge_results, metric)
+    is_paired = test in ("paired-t", "wilcoxon-signed")
+    if is_paired:
+        # Per-model dict keyed by run_index; align per-pair below.
+        paired_by_model = _extract_paired_metric_samples(
+            states_by_model, judge_results, metric
+        )
+        samples_by_model: dict[str, list[float]] = {
+            m: list(d.values()) for m, d in paired_by_model.items()
+        }
+    else:
+        paired_by_model = None
+        samples_by_model = _extract_metric_samples(
+            states_by_model, judge_results, metric
+        )
 
     pairs: list[tuple[str, str]] = []
     for i, model_a in enumerate(models):
@@ -429,8 +467,14 @@ def compute_pairwise_significance(
     raw_p_values: list[float] = []
 
     for model_a, model_b in pairs:
-        sample_a = samples_by_model.get(model_a, [])
-        sample_b = samples_by_model.get(model_b, [])
+        if is_paired and paired_by_model is not None:
+            sample_a, sample_b = _align_paired_samples(
+                paired_by_model.get(model_a, {}),
+                paired_by_model.get(model_b, {}),
+            )
+        else:
+            sample_a = samples_by_model.get(model_a, [])
+            sample_b = samples_by_model.get(model_b, [])
         n_a, n_b = len(sample_a), len(sample_b)
 
         mean_a = stdlib_statistics.mean(sample_a) if sample_a else 0.0
@@ -489,6 +533,13 @@ def compute_pairwise_significance(
             t_stat, p_value = mann_whitney_u_test(sample_a, sample_b)
             df = None
             test_used = "mann_whitney_u"
+        elif test == "paired-t":
+            t_stat, df, p_value = paired_t_test(sample_a, sample_b)
+            test_used = "paired_t_test"
+        elif test == "wilcoxon-signed":
+            t_stat, p_value = wilcoxon_signed_rank(sample_a, sample_b)
+            df = None
+            test_used = "wilcoxon_signed_rank"
         else:
             raise ValueError(f"Unknown test: {test}")
 
@@ -550,3 +601,602 @@ def compute_pairwise_significance(
         )
 
     return final_results
+
+
+# ===========================================================================
+# v0.1.3: bootstrap confidence intervals + paired tests + McNemar's test
+# ===========================================================================
+
+
+@dataclass
+class ConfidenceInterval:
+    """Bootstrap confidence interval for a scalar statistic.
+
+    Used in per-cell statistics to show uncertainty on means alongside
+    the point estimate. Recorded with the parameters that produced it
+    so output is reproducible given the same seed.
+    """
+
+    point_estimate: float
+    ci_low: float
+    ci_high: float
+    ci_level: float  # e.g. 0.95
+    method: str  # "bca", "percentile", "basic"
+    n_resamples: int
+    seed: int | None  # None = non-deterministic (warned in CLI)
+    n_samples: int  # Sample size used
+
+
+@dataclass
+class McNemarResult:
+    """McNemar's test result for a paired binary comparison.
+
+    Used for hallucination pass/fail comparisons between models. The
+    discordant counts (b, c) are the inputs that matter to the test;
+    both_pass / both_fail are recorded for the 2x2 table summary.
+
+    Implementation uses Edwards-corrected chi-square or exact binomial
+    test (NOT scipy.stats.chi2_contingency, which tests independence).
+    """
+
+    model_a: str
+    model_b: str
+    metric: str  # e.g. "hallucination_rate"
+    both_pass: int
+    a_pass_b_fail: int  # discordant: b
+    a_fail_b_pass: int  # discordant: c
+    both_fail: int
+    n_discordant: int
+    a_pass_rate: float
+    b_pass_rate: float
+    chi2_statistic: float | None  # None when exact binomial used
+    p_value: float | None  # None when n_discordant == 0
+    p_value_corrected: float | None
+    correction_method: str  # "bonferroni", "holm", "none"
+    n_comparisons: int
+    threshold: float
+    significant_at_threshold: bool
+    method: str  # "exact_binomial" or "edwards_chi2"
+
+
+def bootstrap_ci(
+    samples: list[float],
+    statistic: Callable[[Any], float] | None = None,
+    *,
+    ci_level: float = 0.95,
+    method: str = "bca",
+    n_resamples: int = 5000,
+    seed: int | None = None,
+) -> ConfidenceInterval | None:
+    """Bootstrap confidence interval for a scalar statistic.
+
+    Thin wrapper around scipy.stats.bootstrap. Default statistic is
+    np.mean; default method is "bca" (bias-corrected and accelerated,
+    industry standard for publication-grade CIs).
+
+    Returns None when:
+      - sample has fewer than 2 observations
+      - scipy raises (degenerate data, etc.)
+      - the resulting CI bounds are non-finite (zero-variance edge case)
+    """
+    n = len(samples)
+    if n < 2:
+        return None
+
+    stat_fn: Callable[[Any], float] = statistic if statistic is not None else np.mean
+
+    data = (samples,)
+    try:
+        with warnings.catch_warnings():
+            # BCa on degenerate data emits a DegenerateDataWarning then
+            # returns NaN bounds; we filter the NaN below.
+            warnings.simplefilter("ignore")
+            result = _scipy_stats.bootstrap(
+                data,
+                stat_fn,
+                n_resamples=n_resamples,
+                confidence_level=ci_level,
+                method=method,
+                random_state=seed,
+            )
+    except Exception:
+        return None
+
+    ci_low = float(result.confidence_interval.low)
+    ci_high = float(result.confidence_interval.high)
+    if not (math.isfinite(ci_low) and math.isfinite(ci_high)):
+        return None
+
+    point = float(stat_fn(samples))
+    return ConfidenceInterval(
+        point_estimate=point,
+        ci_low=ci_low,
+        ci_high=ci_high,
+        ci_level=ci_level,
+        method=method,
+        n_resamples=n_resamples,
+        seed=seed,
+        n_samples=n,
+    )
+
+
+def paired_t_test(
+    sample_a: list[float], sample_b: list[float]
+) -> tuple[float, float, float]:
+    """Paired t-test via scipy.stats.ttest_rel.
+
+    Inputs MUST be same-length and aligned by observation. Use
+    `_extract_paired_metric_samples` + `_align_paired_samples` to build
+    aligned inputs from raw states_by_model.
+
+    Returns (t_statistic, degrees_of_freedom, two_tailed_p_value).
+    Raises ValueError on unequal lengths or n < 2.
+    """
+    if len(sample_a) != len(sample_b):
+        raise ValueError(
+            f"Paired t-test requires equal-length samples, "
+            f"got {len(sample_a)} and {len(sample_b)}"
+        )
+    if len(sample_a) < 2:
+        raise ValueError("Paired t-test requires at least 2 paired samples")
+
+    result = _scipy_stats.ttest_rel(sample_a, sample_b)
+    df = float(len(sample_a) - 1)
+    return float(result.statistic), df, float(result.pvalue)
+
+
+def wilcoxon_signed_rank(
+    sample_a: list[float], sample_b: list[float]
+) -> tuple[float, float]:
+    """Wilcoxon signed-rank paired test via scipy.stats.wilcoxon.
+
+    Non-parametric paired test - more robust than paired_t for non-normal
+    or ordinal data. Inputs MUST be same-length and aligned by observation.
+
+    Defaults: zero_method="wilcox" (drops zero differences),
+    correction=False, alternative="two-sided".
+
+    Returns (W_statistic, two_tailed_p_value).
+    Raises ValueError on unequal lengths or n < 2.
+    """
+    if len(sample_a) != len(sample_b):
+        raise ValueError(
+            f"Wilcoxon requires equal-length samples, "
+            f"got {len(sample_a)} and {len(sample_b)}"
+        )
+    if len(sample_a) < 2:
+        raise ValueError("Wilcoxon requires at least 2 paired samples")
+
+    with warnings.catch_warnings():
+        # All-zero-differences emits a harmless RuntimeWarning.
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        result = _scipy_stats.wilcoxon(
+            sample_a,
+            sample_b,
+            zero_method="wilcox",
+            correction=False,
+            alternative="two-sided",
+        )
+    return float(result.statistic), float(result.pvalue)
+
+
+def mcnemar_test(
+    b_only_a_pass: int,
+    c_only_b_pass: int,
+    *,
+    exact: bool = False,
+) -> tuple[float | None, float]:
+    """McNemar's test for paired binary outcomes.
+
+    Critical: do NOT implement via scipy.stats.chi2_contingency on the
+    full 2x2 table - that computes a test of independence, not McNemar's.
+    McNemar only uses the discordant pairs (off-diagonal entries).
+
+    Args:
+        b_only_a_pass: count where model A passes, B fails
+        c_only_b_pass: count where model A fails, B passes
+        exact: force the exact binomial test (recommended for n < 25)
+
+    Returns:
+        (chi2_statistic_or_None, p_value)
+        chi2 is None when the exact binomial test is used.
+
+    Algorithm:
+      - n_discordant = b + c
+      - n_discordant == 0  -> no test possible, returns (None, 1.0)
+      - exact OR n_discordant < 25 -> exact binomial test via binomtest
+      - otherwise           -> Edwards continuity-corrected chi-square
+
+    References:
+      McNemar (1947); Edwards (1948) for continuity correction.
+    """
+    n_discordant = b_only_a_pass + c_only_b_pass
+    if n_discordant == 0:
+        return None, 1.0
+
+    if exact or n_discordant < 25:
+        result = _scipy_stats.binomtest(b_only_a_pass, n_discordant, p=0.5)
+        return None, float(result.pvalue)
+
+    chi2 = (abs(b_only_a_pass - c_only_b_pass) - 1) ** 2 / n_discordant
+    p = float(_scipy_stats.chi2.sf(chi2, df=1))
+    return float(chi2), p
+
+
+def _extract_paired_metric_samples(
+    states_by_model: dict[str, list[Any]],
+    judge_results: list[Any] | None,
+    metric: str,
+) -> dict[str, dict[int, float]]:
+    """Pull per-model metric values indexed by run_index for paired tests.
+
+    Returns {model: {run_index: value}}. Failed states (state.error not
+    None) and missing values are excluded so the caller can intersect
+    indices to get genuine pairs.
+
+    For metric="score", values come from JudgeResult.average_score via
+    the same `_state_id` linkage as `_extract_metric_samples`.
+    """
+    samples_by_model: dict[str, dict[int, float]] = {}
+
+    if metric == "score":
+        scores_by_state_id: dict[int, float] = {}
+        if judge_results:
+            for jr in judge_results:
+                avg = getattr(jr, "average_score", None)
+                state_id = getattr(jr, "_state_id", None)
+                if avg is not None and state_id is not None:
+                    scores_by_state_id[state_id] = float(avg)
+        for model, states in states_by_model.items():
+            samples_by_model[model] = {
+                s.run_index: scores_by_state_id[id(s)]
+                for s in states
+                if s.error is None and id(s) in scores_by_state_id
+            }
+        return samples_by_model
+
+    for model, states in states_by_model.items():
+        successful = [s for s in states if s.error is None]
+        if metric == "latency_ms":
+            samples_by_model[model] = {
+                s.run_index: float(s.latency_ms)
+                for s in successful
+                if s.latency_ms is not None
+            }
+        elif metric == "output_tokens":
+            samples_by_model[model] = {
+                s.run_index: float(s.output_tokens) for s in successful
+            }
+        elif metric == "cost_usd":
+            samples_by_model[model] = {
+                s.run_index: float(s.cost_usd) for s in successful
+            }
+        else:
+            raise ValueError(f"Unknown metric: {metric}")
+    return samples_by_model
+
+
+def _align_paired_samples(
+    samples_a: dict[int, float],
+    samples_b: dict[int, float],
+) -> tuple[list[float], list[float]]:
+    """Intersect on run_index, return aligned (a, b) lists sorted by index.
+
+    Position i in the output pair corresponds to the same original
+    run_index on both models, so paired_t_test / wilcoxon_signed_rank
+    receive genuine pairs even when failures were asymmetric.
+    """
+    common_indices = sorted(set(samples_a.keys()) & set(samples_b.keys()))
+    aligned_a = [samples_a[i] for i in common_indices]
+    aligned_b = [samples_b[i] for i in common_indices]
+    return aligned_a, aligned_b
+
+
+def _bootstrap_mean(
+    samples: list[float],
+    *,
+    ci_level: float,
+    method: str,
+    n_resamples: int,
+    seed: int | None,
+) -> tuple[float | None, float | None]:
+    """Convenience for bootstrap CI on a mean - returns (low, high) or (None, None)."""
+    ci = bootstrap_ci(
+        samples,
+        statistic=np.mean,
+        ci_level=ci_level,
+        method=method,
+        n_resamples=n_resamples,
+        seed=seed,
+    )
+    if ci is None:
+        return None, None
+    return ci.ci_low, ci.ci_high
+
+
+def compute_stats_with_cis(
+    states_by_model: dict[str, list[Any]],
+    judge_results: list[Any] | None,
+    *,
+    ci_level: float = 0.95,
+    ci_method: str = "bca",
+    n_resamples: int = 5000,
+    seed: int | None = None,
+) -> dict[str, dict[str, ConfidenceInterval | None]]:
+    """Compute bootstrap CIs on per-model metric means.
+
+    Returns {model: {metric_name: ConfidenceInterval | None}} for the
+    four base metrics (latency_ms, output_tokens, cost_usd, plus score
+    when judge_results provided).
+    """
+    out: dict[str, dict[str, ConfidenceInterval | None]] = {}
+    metrics = ["latency_ms", "output_tokens", "cost_usd"]
+    if judge_results:
+        metrics.append("score")
+
+    for metric in metrics:
+        samples_by_model = _extract_metric_samples(
+            states_by_model, judge_results, metric
+        )
+        for model, samples in samples_by_model.items():
+            ci = bootstrap_ci(
+                samples,
+                statistic=np.mean,
+                ci_level=ci_level,
+                method=ci_method,
+                n_resamples=n_resamples,
+                seed=seed,
+            )
+            out.setdefault(model, {})[metric] = ci
+    return out
+
+
+def compute_mcnemar_pairwise(
+    states_by_model: dict[str, list[Any]],
+    judge_by_state_id: dict[int, Any],
+    *,
+    correction: Literal["none", "bonferroni", "holm"] = "bonferroni",
+    threshold: float = 0.05,
+    metric: str = "hallucination_rate",
+) -> list[McNemarResult]:
+    """Pairwise McNemar's tests on hallucination pass/fail outcomes.
+
+    "Pass" is defined as judge.aggregated_risk_level != "High". Runs
+    where either model's judge result is missing (or the model failed)
+    are skipped for that pair. Intersection on run_index gives the
+    set of paired runs used for the 2x2 table.
+
+    Returns one McNemarResult per unordered (model_a, model_b) pair.
+    """
+    models = list(states_by_model.keys())
+    if len(models) < 2:
+        return []
+
+    # Build per-model {run_index: pass_bool} using state_id -> judge lookup.
+    outcomes_by_model: dict[str, dict[int, bool]] = {}
+    for model, states in states_by_model.items():
+        m: dict[int, bool] = {}
+        for s in states:
+            if s.error is not None:
+                continue
+            jr = judge_by_state_id.get(id(s))
+            if jr is None or not getattr(jr, "judges", None):
+                continue
+            risk = getattr(jr, "aggregated_risk_level", None)
+            if risk is None:
+                continue
+            m[s.run_index] = risk != "High"
+        outcomes_by_model[model] = m
+
+    pairs: list[tuple[str, str]] = []
+    for i, a in enumerate(models):
+        for b in models[i + 1 :]:
+            pairs.append((a, b))
+    n_comparisons = len(pairs)
+
+    raw: list[dict[str, Any]] = []
+    raw_p_values: list[float] = []
+    for a, b in pairs:
+        outcomes_a = outcomes_by_model.get(a, {})
+        outcomes_b = outcomes_by_model.get(b, {})
+        common = sorted(set(outcomes_a.keys()) & set(outcomes_b.keys()))
+
+        both_pass = a_pass_b_fail = a_fail_b_pass = both_fail = 0
+        for idx in common:
+            pa, pb = outcomes_a[idx], outcomes_b[idx]
+            if pa and pb:
+                both_pass += 1
+            elif pa and not pb:
+                a_pass_b_fail += 1
+            elif not pa and pb:
+                a_fail_b_pass += 1
+            else:
+                both_fail += 1
+
+        n_paired = len(common)
+        a_pass_rate = (both_pass + a_pass_b_fail) / n_paired if n_paired else 0.0
+        b_pass_rate = (both_pass + a_fail_b_pass) / n_paired if n_paired else 0.0
+        n_discordant = a_pass_b_fail + a_fail_b_pass
+
+        chi2_stat, p_value = mcnemar_test(a_pass_b_fail, a_fail_b_pass)
+        # method label for downstream display
+        if n_discordant == 0:
+            method_label = "no_discordant"
+        elif n_discordant < 25:
+            method_label = "exact_binomial"
+        else:
+            method_label = "edwards_chi2"
+
+        raw.append(
+            {
+                "model_a": a,
+                "model_b": b,
+                "metric": metric,
+                "both_pass": both_pass,
+                "a_pass_b_fail": a_pass_b_fail,
+                "a_fail_b_pass": a_fail_b_pass,
+                "both_fail": both_fail,
+                "n_discordant": n_discordant,
+                "a_pass_rate": a_pass_rate,
+                "b_pass_rate": b_pass_rate,
+                "chi2_statistic": chi2_stat,
+                "p_value": p_value,
+                "method": method_label,
+            }
+        )
+        # If p_value is None (no discordant pairs), treat as p=1.0 for correction.
+        raw_p_values.append(p_value if p_value is not None else 1.0)
+
+    if correction == "bonferroni":
+        corrected = bonferroni_correct(raw_p_values, n_comparisons)
+    elif correction == "holm":
+        corrected = holm_correct(raw_p_values)
+    else:
+        corrected = list(raw_p_values)
+
+    results: list[McNemarResult] = []
+    for r, c_p in zip(raw, corrected, strict=True):
+        if r["p_value"] is None:
+            corrected_p: float | None = None
+            sig = False
+        else:
+            corrected_p = c_p
+            sig = c_p < threshold
+        results.append(
+            McNemarResult(
+                model_a=r["model_a"],
+                model_b=r["model_b"],
+                metric=r["metric"],
+                both_pass=r["both_pass"],
+                a_pass_b_fail=r["a_pass_b_fail"],
+                a_fail_b_pass=r["a_fail_b_pass"],
+                both_fail=r["both_fail"],
+                n_discordant=r["n_discordant"],
+                a_pass_rate=r["a_pass_rate"],
+                b_pass_rate=r["b_pass_rate"],
+                chi2_statistic=r["chi2_statistic"],
+                p_value=r["p_value"],
+                p_value_corrected=corrected_p,
+                correction_method=correction,
+                n_comparisons=n_comparisons,
+                threshold=threshold,
+                significant_at_threshold=sig,
+                method=r["method"],
+            )
+        )
+    return results
+
+
+def compute_significance_with_ci(
+    states_by_model: dict[str, list[Any]],
+    judge_results: list[Any] | None,
+    *,
+    metric: str = "latency_ms",
+    test: Literal[
+        "welch", "mann-whitney", "paired-t", "wilcoxon-signed"
+    ] = "welch",
+    correction: Literal["none", "bonferroni", "holm"] = "bonferroni",
+    threshold: float = 0.05,
+    compute_ci: bool = True,
+    ci_level: float = 0.95,
+    ci_method: str = "bca",
+    n_resamples: int = 5000,
+    seed: int | None = None,
+) -> list[SignificanceResult]:
+    """compute_pairwise_significance + optional bootstrap CIs on Cohen's d.
+
+    When compute_ci is True, attaches a bootstrap CI on the effect size
+    (Cohen's d) to each result via paired bootstrap of the d statistic.
+    For paired tests the bootstrap samples paired observations; for
+    independent tests it bootstraps both samples independently and
+    recomputes d each resample.
+    """
+    results = compute_pairwise_significance(
+        states_by_model,
+        judge_results,
+        metric=metric,
+        test=test,
+        correction=correction,
+        threshold=threshold,
+    )
+
+    if not compute_ci or not results:
+        return results
+
+    is_paired = test in ("paired-t", "wilcoxon-signed")
+    if is_paired:
+        paired_by_model = _extract_paired_metric_samples(
+            states_by_model, judge_results, metric
+        )
+    else:
+        samples_by_model = _extract_metric_samples(
+            states_by_model, judge_results, metric
+        )
+
+    rng = np.random.default_rng(seed)
+
+    for sr in results:
+        if sr.effect_size is None or sr.test_used in (
+            "insufficient_samples",
+            "zero_variance",
+            "trivial",
+        ):
+            continue
+
+        if is_paired:
+            aligned_a, aligned_b = _align_paired_samples(
+                paired_by_model.get(sr.model_a, {}),
+                paired_by_model.get(sr.model_b, {}),
+            )
+            n_pairs = len(aligned_a)
+            if n_pairs < 2:
+                continue
+            arr_a = np.asarray(aligned_a, dtype=float)
+            arr_b = np.asarray(aligned_b, dtype=float)
+            ds: list[float] = []
+            for _ in range(n_resamples):
+                idx = rng.integers(0, n_pairs, n_pairs)
+                d = _cohens_d_numpy(arr_a[idx], arr_b[idx])
+                if d is not None:
+                    ds.append(d)
+        else:
+            arr_a = np.asarray(samples_by_model.get(sr.model_a, []), dtype=float)
+            arr_b = np.asarray(samples_by_model.get(sr.model_b, []), dtype=float)
+            if len(arr_a) < 2 or len(arr_b) < 2:
+                continue
+            ds = []
+            for _ in range(n_resamples):
+                ia = rng.integers(0, len(arr_a), len(arr_a))
+                ib = rng.integers(0, len(arr_b), len(arr_b))
+                d = _cohens_d_numpy(arr_a[ia], arr_b[ib])
+                if d is not None:
+                    ds.append(d)
+
+        if len(ds) < 2:
+            continue
+        alpha = 1.0 - ci_level
+        lower_pct = 100.0 * alpha / 2.0
+        upper_pct = 100.0 * (1.0 - alpha / 2.0)
+        lo = float(np.percentile(ds, lower_pct))
+        hi = float(np.percentile(ds, upper_pct))
+        if math.isfinite(lo) and math.isfinite(hi):
+            sr.effect_size_ci_low = lo
+            sr.effect_size_ci_high = hi
+            sr.bootstrap_method = ci_method
+            sr.bootstrap_resamples = n_resamples
+            sr.bootstrap_seed = seed
+
+    return results
+
+
+def _cohens_d_numpy(a: np.ndarray, b: np.ndarray) -> float | None:
+    """Cohen's d on numpy arrays (faster bootstrap inner loop)."""
+    n_a, n_b = len(a), len(b)
+    if n_a < 2 or n_b < 2:
+        return None
+    var_a = float(np.var(a, ddof=1))
+    var_b = float(np.var(b, ddof=1))
+    pooled_var = ((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2)
+    if pooled_var == 0:
+        return 0.0 if float(np.mean(a)) == float(np.mean(b)) else None
+    return (float(np.mean(a)) - float(np.mean(b))) / math.sqrt(pooled_var)
