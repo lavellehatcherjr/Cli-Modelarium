@@ -14,6 +14,7 @@ Three concerns:
 The judge call itself uses `temperature=0.0` always - deterministic scoring
 makes the panel comparable across runs.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -294,9 +295,7 @@ async def score_with_judge(
     """
     parser = response_parser or parse_judge_response
 
-    judge_prompt = build_judge_prompt(
-        original_prompt, response_to_eval, criteria, template
-    )
+    judge_prompt = build_judge_prompt(original_prompt, response_to_eval, criteria, template)
     start = time.monotonic()
     try:
         result = await judge_provider.complete(
@@ -371,25 +370,29 @@ async def run_judging(
     # One semaphore + one instance per UNIQUE judge provider (not per judge
     # model). Lets us keep rate-limit hygiene when a single provider hosts
     # several judges in the panel.
-    judge_providers_needed: dict[str, str] = {
-        m: get_provider_for_model(m) for m in judge_models
-    }
+    judge_providers_needed: dict[str, str] = {m: get_provider_for_model(m) for m in judge_models}
     provider_names = sorted(set(judge_providers_needed.values()))
-    instances: dict[str, BaseProvider] = {
-        n: provider_factory(n) for n in provider_names
-    }
+    instances: dict[str, BaseProvider] = {n: provider_factory(n) for n in provider_names}
     semaphores: dict[str, asyncio.Semaphore] = {
         n: asyncio.Semaphore(concurrency) for n in provider_names
     }
 
     async def _score_with_sem(
-        provider: BaseProvider, semaphore: asyncio.Semaphore, judge_model: str,
-        original_prompt: str, response_text: str,
+        provider: BaseProvider,
+        semaphore: asyncio.Semaphore,
+        judge_model: str,
+        original_prompt: str,
+        response_text: str,
     ) -> JudgeScore:
         async with semaphore:
             return await score_with_judge(
-                provider, judge_model, original_prompt, response_text,
-                criteria, template, response_parser=response_parser,
+                provider,
+                judge_model,
+                original_prompt,
+                response_text,
+                criteria,
+                template,
+                response_parser=response_parser,
             )
 
     async def _score_state(state: StreamState, original_prompt: str) -> JudgeResult:
@@ -414,21 +417,13 @@ async def run_judging(
                 )
             )
 
-        judges: list[JudgeScore] = (
-            list(await asyncio.gather(*tasks)) if tasks else []
-        )
+        judges: list[JudgeScore] = list(await asyncio.gather(*tasks)) if tasks else []
         return _aggregate(judges, skipped_models=skipped)
 
-    return list(
-        await asyncio.gather(
-            *[_score_state(state, prompt) for state, prompt in items]
-        )
-    )
+    return list(await asyncio.gather(*[_score_state(state, prompt) for state, prompt in items]))
 
 
-def _aggregate(
-    judges: list[JudgeScore], *, skipped_models: list[str] | None = None
-) -> JudgeResult:
+def _aggregate(judges: list[JudgeScore], *, skipped_models: list[str] | None = None) -> JudgeResult:
     """Compute average and std_dev across successfully-scored judges."""
     successful = [j for j in judges if j.score is not None]
     if successful:
