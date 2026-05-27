@@ -15,6 +15,7 @@ Per-prompt system-prompt override (when a BatchPrompt has a `system` field)
 takes precedence over command-line system prompts for that specific prompt
 only - other prompts still use the command-line list.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -66,7 +67,7 @@ class BatchPrompt:
     id: str
     prompt: str
     system: str | None = None
-    # Phase 9 will execute these; for now we parse and pass through.
+    # Raw assertion dicts as-loaded; executed downstream by assertions.run_assertions.
     assertions: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -113,9 +114,7 @@ def _parse_txt(path: Path) -> list[BatchPrompt]:
             # Comment line - inline `#` mid-line is NOT a comment marker
             # (would conflict with model output that legitimately contains `#`).
             continue
-        prompts.append(
-            BatchPrompt(id=f"p{len(prompts) + 1}", prompt=stripped)
-        )
+        prompts.append(BatchPrompt(id=f"p{len(prompts) + 1}", prompt=stripped))
     return prompts
 
 
@@ -134,8 +133,7 @@ def _parse_json(path: Path) -> list[BatchPrompt]:
     for i, item in enumerate(data):
         if not isinstance(item, dict):
             raise BatchValidationError(
-                f"Batch element #{i} is not an object "
-                f"(got {type(item).__name__!r}). At: {path}"
+                f"Batch element #{i} is not an object (got {type(item).__name__!r}). At: {path}"
             )
         if "prompt" not in item:
             raise BatchValidationError(
@@ -143,14 +141,10 @@ def _parse_json(path: Path) -> list[BatchPrompt]:
             )
         prompt = item["prompt"]
         if not isinstance(prompt, str):
-            raise BatchValidationError(
-                f"Batch element #{i} 'prompt' must be a string. At: {path}"
-            )
+            raise BatchValidationError(f"Batch element #{i} 'prompt' must be a string. At: {path}")
         prompt_id = item.get("id") or f"p{i + 1}"
         if not isinstance(prompt_id, str):
-            raise BatchValidationError(
-                f"Batch element #{i} 'id' must be a string. At: {path}"
-            )
+            raise BatchValidationError(f"Batch element #{i} 'id' must be a string. At: {path}")
         if prompt_id in seen_ids:
             raise BatchValidationError(
                 f"Batch contains duplicate prompt id {prompt_id!r}. At: {path}"
@@ -249,6 +243,37 @@ def estimate_batch_cost(
     return total
 
 
+def estimate_compare_cost(
+    models: list[str],
+    temperatures: list[float],
+    system_prompts: list[str | None],
+) -> float:
+    """Upper-bound USD cost estimate for a compare run.
+
+    Compare runs 1 prompt x M models x T temperatures x S system_prompts.
+    Uses ESTIMATE_INPUT_TOKENS and ESTIMATE_OUTPUT_TOKENS as the per-call
+    upper bound. Local models contribute $0. Unknown models are silently
+    skipped (real call will fail at runtime if model truly invalid).
+
+    Does NOT include judge cost (judge output length unknown until run).
+    """
+    total = 0.0
+    for _sp in system_prompts:
+        for model in models:
+            if is_local_model(model):
+                continue
+            for _temp in temperatures:
+                try:
+                    total += calculate_cost(
+                        model,
+                        input_tokens=ESTIMATE_INPUT_TOKENS,
+                        output_tokens=ESTIMATE_OUTPUT_TOKENS,
+                    )
+                except ModelariumError:
+                    pass
+    return total
+
+
 def _count_total_calls(
     prompts: list[BatchPrompt],
     models: list[str],
@@ -312,7 +337,7 @@ async def run_batch(
     concurrency: int,
     max_retries: int = DEFAULT_MAX_RETRIES,
     show_progress: bool = True,
-    sleep: Callable[[float], "asyncio.Future[None]"] = asyncio.sleep,
+    sleep: Callable[[float], asyncio.Future[None]] = asyncio.sleep,
 ) -> list[tuple[StreamState, BatchPrompt]]:
     """Run every (state, prompt) pair in parallel under per-provider semaphores.
 
@@ -323,9 +348,7 @@ async def run_batch(
     Returns the same `pairs` list (states mutated in place) for convenience.
     """
     provider_names = sorted({s.provider_name for s, _ in pairs})
-    instances: dict[str, BaseProvider] = {
-        name: provider_factory(name) for name in provider_names
-    }
+    instances: dict[str, BaseProvider] = {name: provider_factory(name) for name in provider_names}
     semaphores: dict[str, asyncio.Semaphore] = {
         name: asyncio.Semaphore(concurrency) for name in provider_names
     }
