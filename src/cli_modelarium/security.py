@@ -8,6 +8,7 @@ Three layered defenses:
 Environment variables take precedence over the keychain so CI/CD pipelines
 work without touching the system keychain.
 """
+
 from __future__ import annotations
 
 import os
@@ -112,8 +113,7 @@ def save_key(provider: str, key: str) -> None:
     normalized = normalize_key(key)
     if not validate_key(provider, normalized):
         raise ValueError(
-            f"Invalid API key format for {provider}. "
-            f"Please check the key and try again."
+            f"Invalid API key format for {provider}. Please check the key and try again."
         )
     keyring.set_password(SERVICE_NAME, provider, normalized)
 
@@ -134,12 +134,19 @@ def load_key(provider: str) -> str | None:
         return None
 
 
-def delete_key(provider: str) -> None:
-    """Remove an API key from the keychain. Silent if no key was stored."""
+def delete_key(provider: str) -> bool:
+    """Delete API key from keychain.
+
+    Returns True if a key was actually removed, False if no key
+    was stored. Never raises for missing keys.
+    """
     try:
         keyring.delete_password(SERVICE_NAME, provider)
-    except (keyring.errors.PasswordDeleteError, keyring.errors.KeyringError):
-        pass
+        return True
+    except keyring.errors.PasswordDeleteError:
+        return False
+    except keyring.errors.KeyringError:
+        return False
 
 
 def is_key_configured(provider: str) -> bool:
@@ -180,9 +187,16 @@ def load_local_url() -> str | None:
         return None
 
 
-def delete_local_url() -> None:
-    """Remove the saved local-provider URL. Silent if nothing was stored."""
+def delete_local_url() -> bool:
+    """Delete saved local provider URL.
+
+    Returns True if a URL was actually removed, False if none was
+    saved. Never raises for missing URLs.
+    """
     try:
         keyring.delete_password(SERVICE_NAME, LOCAL_URL_KEY)
-    except (keyring.errors.PasswordDeleteError, keyring.errors.KeyringError):
-        pass
+        return True
+    except keyring.errors.PasswordDeleteError:
+        return False
+    except keyring.errors.KeyringError:
+        return False
