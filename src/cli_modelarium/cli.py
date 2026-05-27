@@ -1,9 +1,11 @@
 """Click CLI entry point for Cli Modelarium."""
+
 from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Any
+from collections.abc import Callable
+from pathlib import Path
 
 import click
 import httpx
@@ -13,13 +15,21 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from cli_modelarium import __version__
+from cli_modelarium.assertions import (
+    AssertionResult,
+    count_failed,
+    count_passed,
+    run_assertions,
+)
 from cli_modelarium.batch import (
     ESTIMATE_INPUT_TOKENS,
     ESTIMATE_OUTPUT_TOKENS,
+    BatchPrompt,
     build_batch_states,
     check_batch_size_limits,
     detect_output_format,
     estimate_batch_cost,
+    estimate_compare_cost,
     load_batch_file,
     output_overlaps_input,
     run_batch,
@@ -27,23 +37,14 @@ from cli_modelarium.batch import (
 from cli_modelarium.exceptions import (
     BatchSizeError,
     BatchValidationError,
-    CostLimitExceededError,
     KeyNotConfiguredError,
     ModelariumError,
     OutputFormatError,
-    ProviderError,
     UnknownModelError,
     UnknownProviderError,
 )
-from cli_modelarium.assertions import (
-    AssertionResult,
-    count_failed,
-    count_passed,
-    run_assertions,
-)
 from cli_modelarium.hallucination import (
     HALLUCINATION_TOS_EXTENSION,
-    HallucinationConfig,
     annotate_risk_levels,
     parse_hallucination_response,
     resolve_hallucination_config,
@@ -58,21 +59,21 @@ from cli_modelarium.judging import (
     total_judge_calls,
     total_judge_cost,
 )
+from cli_modelarium.models_registry import (
+    all_known_providers,
+    list_models_for_provider,
+    parse_models_arg,
+)
 from cli_modelarium.output_formatters import (
+    BatchResult,
     render_markdown_to_console,
     state_to_result,
     write_csv,
     write_json,
     write_markdown,
 )
-from cli_modelarium.models_registry import (
-    all_known_providers,
-    list_models_for_provider,
-    parse_models_arg,
-)
 from cli_modelarium.pricing import (
     PRICING,
-    PRICING_AS_OF,
     is_local_model,
     pricing_freshness_note,
 )
@@ -111,7 +112,7 @@ PROVIDER_REGISTRY: dict[str, str] = {
 
 # Exit codes used across the CLI (matches CI/CD conventions).
 EXIT_OK = 0
-EXIT_ASSERTION_FAILED = 1  # reserved for Phase 9
+EXIT_ASSERTION_FAILED = 1  # batch mode: at least one assertion failed
 EXIT_CALL_FAILED = 2
 
 console = Console()
@@ -159,7 +160,10 @@ def main(ctx: click.Context) -> None:
 @click.option("--system-prompt", help="System prompt applied to every model.")
 @click.option(
     "--system-prompts",
-    help="Comma-separated system prompts; the comparison fans out across them. Use \\, for a literal comma.",
+    help=(
+        "Comma-separated system prompts; the comparison fans out across them. "
+        "Use \\, for a literal comma."
+    ),
 )
 @click.option(
     "--system-prompt-file",
@@ -207,21 +211,114 @@ def main(ctx: click.Context) -> None:
     type=click.Path(),
     help="Override the hallucination criteria text with a custom UTF-8 file (max 1 MB).",
 )
-@click.option("--output", type=click.Path(), help="Output file path (Phase 7).")
+@click.option(
+    "--output",
+    type=click.Path(),
+    help=(
+        "Write results to this file. Format inferred from extension "
+        "(.csv, .json, .md). Default: render Rich table to stdout."
+    ),
+)
 @click.option(
     "--output-format",
     type=click.Choice(["csv", "json", "markdown"], case_sensitive=False),
-    help="Output format (Phase 7).",
+    help="Override the output format inferred from --output's extension (csv | json | markdown).",
 )
-@click.option("--max-cost", type=float, help="Refuse to run if estimated cost exceeds this USD.")
+@click.option(
+    "--max-cost",
+    type=click.FloatRange(min=0.0),
+    help="Refuse to run if estimated cost exceeds this USD (excludes judge cost).",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Overwrite the output file if it exists.",
+)
 @click.option(
     "--concurrency",
     type=int,
     default=DEFAULT_CONCURRENCY,
     help=f"Max concurrent calls per provider (default: {DEFAULT_CONCURRENCY}).",
 )
-@click.option("--local-url", help="Override default URL for local model server (Phase 5).")
+@click.option(
+    "--local-url",
+    help=(
+        "Override the default URL for the local model server "
+        "(default: http://localhost:11434/v1, Ollama)."
+    ),
+)
 @click.option("--no-stream", is_flag=True, help="Disable live streaming display.")
+@click.option(
+    "--runs",
+    type=click.IntRange(1, 100),
+    default=1,
+    show_default=True,
+    help=(
+        "Number of times to run each (model, temperature, system_prompt) "
+        "combination. Statistical analysis shown when > 1. Range: 1-100. "
+        "Cost multiplies by this value - use --max-cost for safety."
+    ),
+)
+@click.option(
+    "--show-all-runs",
+    is_flag=True,
+    help=(
+        "Override the auto-collapse heuristic that disables the live display "
+        "when --runs creates more than 12 concurrent tasks. Forces every "
+        "run to render its own streaming panel."
+    ),
+)
+@click.option(
+    "--significance/--no-significance",
+    default=None,
+    help=(
+        "Compute pairwise statistical significance tests between models. "
+        "Auto-enabled when --runs > 1 with 2+ models. Use --no-significance "
+        "to disable."
+    ),
+)
+@click.option(
+    "--significance-threshold",
+    type=click.FloatRange(0.0, 1.0, min_open=True, max_open=True),
+    default=0.05,
+    show_default=True,
+    help=(
+        "P-value threshold for declaring significance. Common values: "
+        "0.05 (default), 0.01 (strict), 0.001 (very strict)."
+    ),
+)
+@click.option(
+    "--significance-test",
+    type=click.Choice(["welch", "mann-whitney"]),
+    default="welch",
+    show_default=True,
+    help=(
+        "Statistical test to use. 'welch' (default) handles unequal "
+        "variances. 'mann-whitney' is non-parametric (no normality "
+        "assumption)."
+    ),
+)
+@click.option(
+    "--correction",
+    type=click.Choice(["none", "bonferroni", "holm"]),
+    default="bonferroni",
+    show_default=True,
+    help=(
+        "Multiple comparison correction. 'bonferroni' (default) is "
+        "conservative. 'holm' is less conservative while still "
+        "controlling family-wise error rate. 'none' is risky with 3+ "
+        "models."
+    ),
+)
+@click.option(
+    "--significance-metric",
+    type=click.Choice(["score", "latency_ms", "output_tokens", "cost_usd"]),
+    default=None,
+    help=(
+        "Metric to test for significance. Default: 'score' when --judge "
+        "enabled, 'latency_ms' otherwise."
+    ),
+)
 def compare(
     prompt: str,
     models: str,
@@ -242,9 +339,17 @@ def compare(
     output: str | None,
     output_format: str | None,
     max_cost: float | None,
+    force: bool,
     concurrency: int,
     local_url: str | None,
     no_stream: bool,
+    runs: int,
+    show_all_runs: bool,
+    significance: bool | None,
+    significance_threshold: float,
+    significance_test: str,
+    correction: str,
+    significance_metric: str | None,
 ) -> None:
     """Run a side-by-side comparison of LLMs on a single prompt."""
     try:
@@ -281,11 +386,54 @@ def compare(
     except click.UsageError:
         raise
     except (
-        UnknownModelError, KeyNotConfiguredError, BatchValidationError,
-        FileNotFoundError, ValueError,
+        UnknownModelError,
+        KeyNotConfiguredError,
+        BatchValidationError,
+        FileNotFoundError,
+        ValueError,
     ) as e:
         _print_error(str(e))
         sys.exit(EXIT_CALL_FAILED)
+
+    # Resolve --output / --output-format up front so a misconfigured path
+    # fails before we burn any API calls. output_path is None when the
+    # caller wants the default Rich display.
+    try:
+        output_path, output_fmt = _resolve_output_path(output, output_format, force)
+    except OutputFormatError as e:
+        _print_error(str(e))
+        sys.exit(EXIT_CALL_FAILED)
+
+    # --max-cost pre-flight (excludes judge cost, matching batch).
+    # With --runs N, multiply the estimate by N before checking the ceiling.
+    if max_cost is not None:
+        per_run = estimate_compare_cost(model_list, temp_list, system_prompt_list)
+        estimated_total = per_run * runs
+        if estimated_total > max_cost:
+            if runs > 1:
+                _print_error(
+                    f"Estimated cost ${estimated_total:.4f} "
+                    f"(= ${per_run:.4f} x {runs} runs) exceeds --max-cost "
+                    f"${max_cost:.4f}. Refusing to run."
+                )
+            else:
+                _print_error(
+                    f"Estimated cost ${estimated_total:.4f} exceeds --max-cost "
+                    f"${max_cost:.4f}. Refusing to run."
+                )
+            sys.exit(EXIT_CALL_FAILED)
+
+    # Print a prominent cost warning when --runs > 1 is used without
+    # --max-cost, so the user is reminded that costs multiply by N.
+    if runs > 1 and max_cost is None:
+        per_run = estimate_compare_cost(model_list, temp_list, system_prompt_list)
+        estimated_total = per_run * runs
+        if estimated_total > 0:
+            console.print(
+                f"[yellow]Note: --runs {runs} multiplies cost. "
+                f"Estimated total: ${estimated_total:.4f} "
+                f"(= ${per_run:.4f} x {runs}).[/yellow]"
+            )
 
     if judge_models and not no_judge_tos:
         print_tos_disclosure(console)
@@ -311,25 +459,44 @@ def compare(
             console=console,
             concurrency=concurrency,
             live_display=not no_stream,
+            runs=runs,
+            show_all_runs=show_all_runs,
         )
         jrs: list[JudgeResult] | None = None
         if judge_models:
-            jrs = await run_judging(
-                items=[(s, prompt) for s in states],
-                judge_models=judge_models,
-                criteria=judge_criteria_list,
-                provider_factory=provider_factory,
-                template=judge_template_text,
-                response_parser=(
-                    parse_hallucination_response
-                    if hallucination_config is not None
-                    else None
-                ),
-                skip_self_eval=True,
-                concurrency=concurrency,
-            )
-            if hallucination_config is not None:
-                annotate_risk_levels(jrs)
+            # Judging strategy with --runs N:
+            #   * Default: mode-only - judge one canonical output per cell
+            #     (cheap; answers "what does this model usually say?").
+            #   * --check-hallucination: per-run - judge every run so we can
+            #     compute the hallucination rate across N runs.
+            #   * runs == 1: existing behavior, one judge call per state.
+            if runs > 1 and hallucination_config is None:
+                jrs = await _run_mode_only_judging(
+                    states=states,
+                    prompt=prompt,
+                    judge_models=judge_models,
+                    criteria=judge_criteria_list,
+                    template=judge_template_text,
+                    provider_factory=provider_factory,
+                    concurrency=concurrency,
+                )
+            else:
+                jrs = await run_judging(
+                    items=[(s, prompt) for s in states],
+                    judge_models=judge_models,
+                    criteria=judge_criteria_list,
+                    provider_factory=provider_factory,
+                    template=judge_template_text,
+                    response_parser=(
+                        parse_hallucination_response
+                        if hallucination_config is not None
+                        else None
+                    ),
+                    skip_self_eval=True,
+                    concurrency=concurrency,
+                )
+                if hallucination_config is not None:
+                    annotate_risk_levels(jrs)
         return states, jrs
 
     try:
@@ -343,15 +510,74 @@ def compare(
         _print_error(redact_secrets(str(e)))
         sys.exit(EXIT_CALL_FAILED)
 
-    _display_results(
-        states,
-        judge_results=judge_results,
-        include_reasoning=include_reasoning,
-        hallucination_mode=hallucination_config is not None,
-        hallucination_facts=(
-            hallucination_config.facts if hallucination_config else None
-        ),
-    )
+    # Pairwise significance: auto-enable when runs > 1 with 2+ models,
+    # unless the user explicitly opted out with --no-significance.
+    if significance is None:
+        should_compute_significance = runs > 1 and len(model_list) >= 2
+    else:
+        should_compute_significance = significance
+
+    significance_results = None
+    if should_compute_significance and runs > 1 and len(model_list) >= 2:
+        from cli_modelarium.run_statistics import compute_pairwise_significance
+
+        # Resolve default metric now that we know whether judging happened.
+        sig_metric = significance_metric
+        if sig_metric is None:
+            sig_metric = "score" if judge_results is not None else "latency_ms"
+
+        # Tag each JudgeResult with its source-state id so the score-extractor
+        # can match them back. This is a private contract between cli.py and
+        # _extract_metric_samples.
+        if judge_results is not None:
+            for state, jr in zip(states, judge_results, strict=True):
+                jr._state_id = id(state)  # type: ignore[attr-defined]
+
+        states_by_model: dict[str, list[StreamState]] = {}
+        for state in states:
+            states_by_model.setdefault(state.model, []).append(state)
+
+        try:
+            significance_results = compute_pairwise_significance(
+                states_by_model,
+                judge_results,
+                metric=sig_metric,
+                test=significance_test,  # type: ignore[arg-type]
+                correction=correction,  # type: ignore[arg-type]
+                threshold=significance_threshold,
+            )
+        except ValueError as e:
+            console.print(f"[yellow]Significance test skipped: {e}[/yellow]")
+            significance_results = None
+
+    if output_path is not None or output_fmt is not None:
+        # File or explicit-format output path: serialize via batch's writers.
+        results = _states_to_compare_results(states, prompt, judge_results)
+        _emit_batch_results(
+            results,
+            output_path=output_path,
+            output_fmt=output_fmt or "markdown",
+            runs=runs,
+            significance_results=significance_results,
+        )
+    elif runs > 1:
+        _display_results_with_runs(
+            states,
+            judge_results=judge_results,
+            runs=runs,
+            include_reasoning=include_reasoning,
+            hallucination_mode=hallucination_config is not None,
+            hallucination_facts=(hallucination_config.facts if hallucination_config else None),
+            significance_results=significance_results,
+        )
+    else:
+        _display_results(
+            states,
+            judge_results=judge_results,
+            include_reasoning=include_reasoning,
+            hallucination_mode=hallucination_config is not None,
+            hallucination_facts=(hallucination_config.facts if hallucination_config else None),
+        )
 
     if any(s.error for s in states):
         sys.exit(EXIT_CALL_FAILED)
@@ -365,10 +591,19 @@ def compare(
 @click.argument("file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--models", required=True, help="Comma-separated model IDs or group names.")
 @click.option("--temperatures", default="0.0", help="Comma-separated temperatures (default: 0.0).")
-@click.option("--system-prompt", help="System prompt applied to every prompt (per-prompt 'system' field in the input file wins for that prompt).")
+@click.option(
+    "--system-prompt",
+    help=(
+        "System prompt applied to every prompt (per-prompt 'system' field in "
+        "the input file wins for that prompt)."
+    ),
+)
 @click.option(
     "--system-prompts",
-    help="Comma-separated system prompts; the matrix fans out across them. Use \\, for a literal comma.",
+    help=(
+        "Comma-separated system prompts; the matrix fans out across them. "
+        "Use \\, for a literal comma."
+    ),
 )
 @click.option(
     "--system-prompt-file",
@@ -416,13 +651,23 @@ def compare(
     type=click.Path(),
     help="Override the hallucination criteria text with a custom UTF-8 file (max 1 MB).",
 )
-@click.option("--output", type=click.Path(), help="Output file path. Format auto-detected from extension; omit to render Markdown on stdout.")
+@click.option(
+    "--output",
+    type=click.Path(),
+    help=(
+        "Output file path. Format auto-detected from extension; omit to render Markdown on stdout."
+    ),
+)
 @click.option(
     "--output-format",
     type=click.Choice(["csv", "json", "markdown"], case_sensitive=False),
     help="Override the output format inferred from --output extension.",
 )
-@click.option("--max-cost", type=float, help="Refuse to run if the estimated cost exceeds this USD.")
+@click.option(
+    "--max-cost",
+    type=click.FloatRange(min=0.0),
+    help="Refuse to run if the estimated cost exceeds this USD (excludes judge cost).",
+)
 @click.option(
     "--concurrency",
     type=int,
@@ -433,22 +678,37 @@ def compare(
 @click.option(
     "--min-pass-rate",
     type=float,
-    help="Exit 1 if assertion pass rate falls below this threshold (0.0-1.0). "
-    "Default behaviour without this flag is strict: ANY assertion failure exits 1.",
+    help=(
+        "Exit 1 if assertion pass rate falls below this threshold (0.0-1.0). "
+        "Default behaviour without this flag is strict: ANY assertion failure "
+        "exits 1."
+    ),
 )
 @click.option(
     "--no-assertions",
     is_flag=True,
-    help="Skip assertion checks entirely. Pass/fail counts are zeroed and exit code reflects only call status.",
+    help=(
+        "Skip assertion checks entirely. Pass/fail counts are zeroed and "
+        "exit code reflects only call status."
+    ),
 )
 @click.option(
     "--strict-assertions",
     is_flag=True,
-    help="Make the default strict behaviour explicit (any assertion failure exits 1). Mutually exclusive with --min-pass-rate.",
+    help=(
+        "Make the default strict behaviour explicit (any assertion failure "
+        "exits 1). Mutually exclusive with --min-pass-rate."
+    ),
 )
-@click.option("--no-judge", is_flag=True, help="Skip judge scoring (Phase 8).")
+@click.option(
+    "--no-judge",
+    is_flag=True,
+    help="Skip judge scoring even if --judge or --judges is configured.",
+)
 @click.option("--force", is_flag=True, help="Overwrite the output file if it exists.")
-@click.option("--force-large", is_flag=True, help=f"Bypass safety caps (max 1000 prompts, max 10000 calls).")
+@click.option(
+    "--force-large", is_flag=True, help="Bypass safety caps (max 1000 prompts, max 10000 calls)."
+)
 def batch(
     file: str,
     models: str,
@@ -495,9 +755,7 @@ def batch(
     # --strict-assertions and --min-pass-rate are alternatives; combining
     # them is ambiguous, so reject upfront.
     if strict_assertions and min_pass_rate is not None:
-        raise click.UsageError(
-            "--strict-assertions and --min-pass-rate are mutually exclusive."
-        )
+        raise click.UsageError("--strict-assertions and --min-pass-rate are mutually exclusive.")
     if min_pass_rate is not None and not (0.0 <= min_pass_rate <= 1.0):
         raise click.UsageError(
             f"--min-pass-rate must be between 0.0 and 1.0 (got {min_pass_rate})."
@@ -635,9 +893,7 @@ def batch(
                 provider_factory=provider_factory,
                 template=judge_template_text,
                 response_parser=(
-                    parse_hallucination_response
-                    if hallucination_config is not None
-                    else None
+                    parse_hallucination_response if hallucination_config is not None else None
                 ),
                 skip_self_eval=True,
                 concurrency=concurrency,
@@ -748,35 +1004,31 @@ def batch(
     sys.exit(EXIT_OK)
 
 
-def _resolve_batch_output(
-    *,
-    input_path: str,
+def _resolve_output_path(
     output: str | None,
     output_format: str | None,
     force: bool,
-) -> tuple["Path | None", str]:
+) -> tuple[Path | None, str | None]:
     """Decide where to write and which format to use.
 
-    Returns (output_path_or_None, format_name).
-        output_path is None when writing to stdout.
-        format_name is one of: csv, json, markdown.
+    Returns (output_path_or_None, format_name_or_None).
+        output_path is None when no file output is configured.
+        format_name is one of: csv, json, markdown - or None when output_path
+            is None AND no --output-format was supplied (callers may treat
+            that as "use the native display path").
 
     Raises OutputFormatError for unknown extensions when --output-format
     isn't passed, and refuses to overwrite an existing file without --force.
-    """
-    from pathlib import Path
 
+    Does NOT check input/output overlap - callers that have an input file
+    must perform that check themselves.
+    """
     if output is None:
-        # Stdout default: markdown.
-        return None, (output_format.lower() if output_format else "markdown")
+        if output_format:
+            return None, output_format.lower()
+        return None, None
 
     output_path = Path(output).expanduser().resolve()
-
-    if output_overlaps_input(Path(input_path), output_path):
-        raise OutputFormatError(
-            f"Refusing to write output over the input file ({output_path}).\n"
-            f"  Choose a different --output path."
-        )
 
     if output_path.exists() and not force:
         raise OutputFormatError(
@@ -802,33 +1054,183 @@ def _resolve_batch_output(
     return output_path, fmt
 
 
+def _resolve_batch_output(
+    *,
+    input_path: str,
+    output: str | None,
+    output_format: str | None,
+    force: bool,
+) -> tuple[Path | None, str]:
+    """Decide where to write and which format to use for the batch command.
+
+    Returns (output_path_or_None, format_name).
+        output_path is None when writing to stdout.
+        format_name is one of: csv, json, markdown (defaults to markdown
+            for stdout when --output-format is not supplied).
+
+    Raises OutputFormatError for unknown extensions when --output-format
+    isn't passed, refuses to overwrite an existing file without --force,
+    and refuses to write output over the input file.
+    """
+    # Overlap check runs BEFORE format detection so a user pointing --output
+    # at an input file (no known output extension) sees the "input file"
+    # error rather than the less-actionable "can't infer format" one.
+    if output is not None:
+        prospective = Path(output).expanduser().resolve()
+        if output_overlaps_input(Path(input_path), prospective):
+            raise OutputFormatError(
+                f"Refusing to write output over the input file ({prospective}).\n"
+                f"  Choose a different --output path."
+            )
+
+    output_path, fmt = _resolve_output_path(output, output_format, force)
+
+    if output_path is None:
+        # Stdout default for batch: markdown.
+        return None, (fmt or "markdown")
+
+    assert fmt is not None  # _resolve_output_path guarantees this when path is non-None
+    return output_path, fmt
+
+
+async def _run_mode_only_judging(
+    *,
+    states: list[StreamState],
+    prompt: str,
+    judge_models: list[str],
+    criteria: list[str] | None,
+    template: str,
+    provider_factory: Callable[[str], BaseProvider],
+    concurrency: int,
+) -> list[JudgeResult]:
+    """Judge only the mode output per cell, then expand the verdict to every run.
+
+    With --runs N, judging every run is expensive. We pick one canonical
+    representative per (model, temperature, system_prompt) cell - the
+    mode output when a clear winner exists, otherwise the first
+    successful run - and assign that single verdict to every state in
+    the cell. Returns a list of JudgeResult parallel to `states`.
+    """
+    from cli_modelarium.run_statistics import compute_run_stats, group_states_by_cell
+
+    groups = group_states_by_cell(states)
+
+    # Pick one representative state per cell.
+    representatives: list[tuple[tuple[str, float, str | None], StreamState]] = []
+    for key, cell_states in groups.items():
+        stats = compute_run_stats(cell_states)
+        chosen: StreamState | None = None
+        if stats.mode_output is not None:
+            for s in cell_states:
+                if s.error is None and s.text == stats.mode_output:
+                    chosen = s
+                    break
+        if chosen is None:
+            # No mode (all unique) or all failed: fall back to first
+            # successful state; if none, the cell stays unjudged.
+            for s in cell_states:
+                if s.error is None:
+                    chosen = s
+                    break
+        if chosen is not None:
+            representatives.append((key, chosen))
+
+    if not representatives:
+        return [JudgeResult() for _ in states]
+
+    cell_verdicts = await run_judging(
+        items=[(s, prompt) for _, s in representatives],
+        judge_models=judge_models,
+        criteria=criteria,
+        provider_factory=provider_factory,
+        template=template,
+        response_parser=None,
+        skip_self_eval=True,
+        concurrency=concurrency,
+    )
+
+    verdict_by_cell: dict[tuple[str, float, str | None], JudgeResult] = {
+        key: verdict for (key, _), verdict in zip(representatives, cell_verdicts, strict=True)
+    }
+
+    # Expand: every state in a cell gets that cell's single verdict.
+    return [
+        verdict_by_cell.get(
+            (s.model, s.temperature, s.system_prompt),
+            JudgeResult(),
+        )
+        for s in states
+    ]
+
+
+def _states_to_compare_results(
+    states: list[StreamState],
+    prompt: str,
+    judge_results: list[JudgeResult] | None = None,
+) -> list[BatchResult]:
+    """Convert compare's flat StreamState list to BatchResult shape.
+
+    Each state becomes a BatchResult with a synthetic BatchPrompt
+    (id=p1, p2, ... matching batch's auto-id convention from
+    `batch._parse_txt`) so that the existing batch formatters can
+    serialize compare results without a parallel codepath.
+    """
+    results: list[BatchResult] = []
+    for i, state in enumerate(states):
+        bp = BatchPrompt(
+            id=f"p{i + 1}",
+            prompt=prompt,
+            system=state.system_prompt,
+        )
+        jr = judge_results[i] if judge_results is not None else None
+        results.append(state_to_result(state, bp, judge_result=jr, assertion_results=None))
+    return results
+
+
 def _emit_batch_results(
-    results: list, *, output_path: "Path | None", output_fmt: str
+    results: list,
+    *,
+    output_path: Path | None,
+    output_fmt: str,
+    runs: int = 1,
+    significance_results: list | None = None,
 ) -> None:
     """Dispatch to the right writer/renderer based on resolved format."""
     if output_path is None:
         # Stdout: only markdown is rendered natively; csv/json get printed raw.
         if output_fmt == "markdown":
-            render_markdown_to_console(results, console)
+            render_markdown_to_console(results, console, runs=runs)
         elif output_fmt == "csv":
             from cli_modelarium.output_formatters import _format_csv
 
-            console.print(_format_csv(results), end="")
+            console.print(_format_csv(results, runs=runs), end="")
         elif output_fmt == "json":
             from cli_modelarium.output_formatters import _format_json
 
-            console.print(_format_json(results), end="")
+            console.print(
+                _format_json(
+                    results,
+                    runs=runs,
+                    significance_results=significance_results,
+                ),
+                end="",
+            )
         else:
             _print_error(f"Unsupported output format: {output_fmt!r}")
             sys.exit(EXIT_CALL_FAILED)
         return
 
     if output_fmt == "csv":
-        write_csv(results, output_path)
+        write_csv(results, output_path, runs=runs)
     elif output_fmt == "json":
-        write_json(results, output_path)
+        write_json(
+            results,
+            output_path,
+            runs=runs,
+            significance_results=significance_results,
+        )
     elif output_fmt == "markdown":
-        write_markdown(results, output_path)
+        write_markdown(results, output_path, runs=runs)
     else:
         _print_error(f"Unsupported output format: {output_fmt!r}")
         sys.exit(EXIT_CALL_FAILED)
@@ -884,8 +1286,7 @@ def configure() -> None:
     console.print()
     console.print(
         Panel(
-            f"{saved} of {len(providers)} providers configured.\n"
-            f"Run: cli-modelarium list-models",
+            f"{saved} of {len(providers)} providers configured.\nRun: cli-modelarium list-models",
             title="Configuration complete",
             border_style="green",
         )
@@ -978,19 +1379,33 @@ def keys_set(provider: str, base_url: str | None) -> None:
 @click.argument("provider")
 def keys_delete(provider: str) -> None:
     """Remove the API key for a provider from the keychain."""
+    if provider != "local" and provider not in KEY_PATTERNS:
+        _print_error(
+            f"Unknown provider: {provider}.\n"
+            f"Supported providers: {', '.join(sorted(KEY_PATTERNS))}, local"
+        )
+        sys.exit(EXIT_CALL_FAILED)
+
     if provider == "local":
-        delete_local_url()
-        console.print("[green]Removed saved local provider URL.[/green]")
+        if delete_local_url():
+            console.print("[green]Removed saved local provider URL.[/green]")
+        else:
+            console.print("[dim]No saved local provider URL.[/dim]")
         return
-    delete_key(provider)
-    console.print(f"[green]Removed {provider} key from keychain.[/green]")
+
+    if delete_key(provider):
+        console.print(f"[green]Removed {provider} key from keychain.[/green]")
+    else:
+        console.print(f"[dim]No {provider} key was stored.[/dim]")
 
 
 # ===== list-models =====
 
 
 @main.command("list-models")
-@click.option("--local", "local_only", is_flag=True, help="Show only local models (queries the local server).")
+@click.option(
+    "--local", "local_only", is_flag=True, help="Show only local models (queries the local server)."
+)
 @click.option("--local-url", help="Override default URL for local-model discovery.")
 def list_models(local_only: bool, local_url: str | None) -> None:
     """List supported models, grouped by provider."""
@@ -1122,9 +1537,8 @@ def _list_local_models(local_url: str | None) -> None:
         table.add_row(f"local/{model_id}", created_text, owned_by, "[dim]Free[/dim]")
 
     console.print(table)
-    console.print(
-        f"\n[dim]Use these via: cli-modelarium 'prompt' --models local/{models[0].get('id', '<name>')}[/dim]"
-    )
+    first_id = models[0].get("id", "<name>")
+    console.print(f"\n[dim]Use these via: cli-modelarium 'prompt' --models local/{first_id}[/dim]")
 
 
 def _format_unix_timestamp(ts: object) -> str:
@@ -1159,7 +1573,11 @@ def pricing_cmd(model: str | None, show_all: bool) -> None:
             entry = PRICING[name]
             if entry.get("is_local"):
                 table.add_row(
-                    name, str(entry["provider"]), "[dim]Free[/dim]", "[dim]Free[/dim]", "[dim]-[/dim]"
+                    name,
+                    str(entry["provider"]),
+                    "[dim]Free[/dim]",
+                    "[dim]Free[/dim]",
+                    "[dim]-[/dim]",
                 )
                 continue
             cached = entry.get("cached_input")
@@ -1239,9 +1657,7 @@ def _resolve_system_prompts(
         if val
     ]
     if len(used) > 1:
-        raise click.UsageError(
-            f"{', '.join(used)} are mutually exclusive - pick one."
-        )
+        raise click.UsageError(f"{', '.join(used)} are mutually exclusive - pick one.")
 
     if system_prompt_file:
         return [load_system_prompt(system_prompt_file)]
@@ -1262,18 +1678,14 @@ _split_escaped_csv = split_escaped_csv
 _split_system_prompts = split_escaped_csv
 
 
-def _resolve_judge_models(
-    *, judge: str | None, judges: str | None
-) -> list[str]:
+def _resolve_judge_models(*, judge: str | None, judges: str | None) -> list[str]:
     """Resolve --judge / --judges into a list of judge model IDs.
 
     Returns [] when neither flag is set. Raises click.UsageError if both
     flags are set simultaneously (they're mutually exclusive).
     """
     if judge and judges:
-        raise click.UsageError(
-            "--judge and --judges are mutually exclusive - pick one."
-        )
+        raise click.UsageError("--judge and --judges are mutually exclusive - pick one.")
     if judges:
         return _split_escaped_csv(judges)
     if judge and judge.strip():
@@ -1308,9 +1720,7 @@ def _resolve_judge_criteria_and_template(
     return criteria, template
 
 
-def _validate_judge_models(
-    judge_models: list[str], *, local_url: str | None
-) -> None:
+def _validate_judge_models(judge_models: list[str], *, local_url: str | None) -> None:
     """Ensure every judge model is in the registry AND has a configured key.
 
     This runs BEFORE any main API calls - the build prompt's contract is
@@ -1333,9 +1743,7 @@ def _validate_judge_models(
             raise KeyNotConfiguredError(provider_name)
 
 
-def _get_provider_instance(
-    provider_name: str, *, local_url: str | None = None
-) -> BaseProvider:
+def _get_provider_instance(provider_name: str, *, local_url: str | None = None) -> BaseProvider:
     """Instantiate the provider for `provider_name`.
 
     For cloud providers: loads the API key from env var / keychain and
@@ -1429,7 +1837,9 @@ def _display_results(
             total_cost += s.cost_usd
             cost_text = "[dim]Free[/dim]" if is_local_model(s.model) else f"${s.cost_usd:.6f}"
             ttft_text = f"{s.ttft_ms / 1000:.2f}s" if s.ttft_ms is not None else "[dim]-[/dim]"
-            latency_text = f"{s.latency_ms / 1000:.2f}s" if s.latency_ms is not None else "[dim]-[/dim]"
+            latency_text = (
+                f"{s.latency_ms / 1000:.2f}s" if s.latency_ms is not None else "[dim]-[/dim]"
+            )
             in_text = str(s.input_tokens)
             out_text = str(s.output_tokens)
 
@@ -1439,14 +1849,16 @@ def _display_results(
                 row.append(f"SP {prompt_indices[s.system_prompt]}")
             else:
                 row.append("[dim]-[/dim]")
-        row.extend([
-            f"{s.temperature:.1f}",
-            ttft_text,
-            latency_text,
-            in_text,
-            out_text,
-            cost_text,
-        ])
+        row.extend(
+            [
+                f"{s.temperature:.1f}",
+                ttft_text,
+                latency_text,
+                in_text,
+                out_text,
+                cost_text,
+            ]
+        )
         if show_score_column:
             assert judge_results is not None
             if hallucination_mode:
@@ -1504,11 +1916,329 @@ def _display_results(
     console.print(f"[dim]{pricing_freshness_note()}[/dim]")
 
 
+def _display_results_with_runs(
+    states: list[StreamState],
+    judge_results: list[JudgeResult] | None,
+    runs: int,
+    include_reasoning: bool = False,
+    hallucination_mode: bool = False,
+    hallucination_facts: list[str] | None = None,
+    significance_results: list | None = None,
+) -> None:
+    """Render the runs > 1 path: one summary row per cell with RunStats.
+
+    Groups states by (model, temperature, system_prompt) cell, computes
+    RunStats per cell, and prints a Rich table with statistical summary
+    columns. Per-run outputs are shown below the table as a collapsed
+    listing.
+
+    `judge_results` is parallel to `states` when provided. With mode-only
+    judging, every state in a cell shares the same JudgeResult, so we pull
+    the cell verdict from the first state.
+
+    When `hallucination_mode=True`, an additional "Hallucination Rate"
+    summary is computed (fraction of runs flagged as High risk per cell).
+    """
+    from cli_modelarium.run_statistics import compute_run_stats, group_states_by_cell
+
+    groups = group_states_by_cell(states)
+    judge_by_state_id: dict[int, JudgeResult] = {}
+    if judge_results is not None:
+        for state, jr in zip(states, judge_results, strict=True):
+            judge_by_state_id[id(state)] = jr
+
+    distinct_sps = {s.system_prompt for s in states if s.system_prompt}
+    show_sp_column = len(distinct_sps) > 1
+    show_hallucination_rate = hallucination_mode and judge_results is not None
+    show_judge_column = judge_results is not None and not show_hallucination_rate
+
+    title = f"Comparing {len(groups)} configuration{'s' if len(groups) != 1 else ''}, {runs} runs each"
+    table = Table(title=title, border_style="dim", title_justify="left")
+    table.add_column("Model", style="bold")
+    if show_sp_column:
+        table.add_column("SP", style="magenta", justify="right")
+    table.add_column("Temp", justify="right")
+    table.add_column("OK/Fail", justify="right")
+    table.add_column("Latency mean ± stdev", justify="right", style="dim")
+    table.add_column("CV", justify="right", style="dim")
+    table.add_column("Tokens mean", justify="right")
+    table.add_column("Cost total", justify="right")
+    table.add_column("Diversity", justify="right")
+    if show_hallucination_rate:
+        table.add_column("Halluc. rate", justify="right", style="magenta")
+    if show_judge_column:
+        table.add_column("Score (mode)", justify="right", style="magenta")
+    table.add_column("Mode", justify="left")
+
+    from cli_modelarium.streaming import prompt_index_map
+
+    prompt_indices = prompt_index_map(states)
+
+    grand_total_cost = 0.0
+    cell_stats: list[tuple[tuple[str, float, str | None], list[StreamState], object]] = []
+    for key, cell_states in groups.items():
+        stats = compute_run_stats(cell_states)
+        cell_stats.append((key, cell_states, stats))
+        grand_total_cost += stats.cost_total_usd
+
+        model, temp, sp = key
+
+        # Hallucination rate: fraction of runs in this cell with risk_level "High".
+        hallucination_rate_text = "[dim]-[/dim]"
+        if show_hallucination_rate:
+            high_count = 0
+            judged = 0
+            for s in cell_states:
+                jr = judge_by_state_id.get(id(s))
+                if jr is None or not jr.judges:
+                    continue
+                judged += 1
+                if jr.aggregated_risk_level == "High":
+                    high_count += 1
+            if judged > 0:
+                rate = high_count / judged
+                color = (
+                    "red" if rate >= 0.5 else "yellow" if rate >= 0.2 else "green"
+                )
+                hallucination_rate_text = f"[{color}]{high_count}/{judged} ({rate * 100:.0f}%)[/{color}]"
+
+        # Judge score (mode-only judging): pull the first non-empty JudgeResult.
+        score_text = "[dim]-[/dim]"
+        if show_judge_column:
+            for s in cell_states:
+                jr = judge_by_state_id.get(id(s))
+                if jr is not None and jr.judges:
+                    score_text = _score_cell_for_compare(jr)
+                    break
+
+        if stats.latency_mean_ms is not None and stats.latency_stdev_ms is not None:
+            latency_cell = f"{stats.latency_mean_ms:.0f} ± {stats.latency_stdev_ms:.0f} ms"
+        elif stats.latency_mean_ms is not None:
+            latency_cell = f"{stats.latency_mean_ms:.0f} ms"
+        else:
+            latency_cell = "[dim]-[/dim]"
+
+        cv_text = f"{stats.latency_cv:.3f}" if stats.latency_cv is not None else "[dim]-[/dim]"
+        tokens_text = (
+            f"{stats.output_tokens_mean:.0f}"
+            if stats.output_tokens_mean is not None
+            else "[dim]-[/dim]"
+        )
+        cost_text = (
+            "[dim]Free[/dim]"
+            if is_local_model(model)
+            else f"${stats.cost_total_usd:.6f}"
+        )
+        diversity_text = f"{stats.output_diversity:.2f}"
+
+        if stats.mode_output is None:
+            mode_text = "[dim]no mode (all unique)[/dim]"
+        else:
+            preview = stats.mode_output.replace("\n", " ").strip()
+            if len(preview) > 50:
+                preview = preview[:47] + "..."
+            mode_text = f'"{preview}" ({stats.mode_count}x)'
+
+        row = [model]
+        if show_sp_column:
+            if sp and sp in prompt_indices:
+                row.append(f"SP {prompt_indices[sp]}")
+            else:
+                row.append("[dim]-[/dim]")
+        row.extend(
+            [
+                f"{temp:.1f}",
+                f"{stats.n_succeeded}/{stats.n_failed}",
+                latency_cell,
+                cv_text,
+                tokens_text,
+                cost_text,
+                diversity_text,
+            ]
+        )
+        if show_hallucination_rate:
+            row.append(hallucination_rate_text)
+        if show_judge_column:
+            row.append(score_text)
+        row.append(mode_text)
+        table.add_row(*row)
+
+    console.print(table)
+    console.print()
+
+    # Per-cell expanded view: list every run's output beneath its cell header.
+    for key, cell_states, _stats in cell_stats:
+        model, temp, sp = key
+        header = f"[bold cyan]>[/bold cyan] [bold]{model}[/bold] @ {temp:.1f}"
+        if show_sp_column and sp and sp in prompt_indices:
+            header += f"  [magenta]SP {prompt_indices[sp]}[/magenta]"
+        console.print(header)
+        for s in cell_states:
+            tag = f"  [dim]run {s.run_index + 1}/{runs}:[/dim]"
+            if s.error:
+                console.print(f"{tag} [red]{s.error}[/red]")
+            else:
+                lines = s.text.splitlines() or [""]
+                console.print(f"{tag} {lines[0]}")
+                for line in lines[1:]:
+                    console.print(f"          {line}")
+        if include_reasoning and judge_results is not None:
+            for s in cell_states:
+                jr = judge_by_state_id.get(id(s))
+                if jr is None:
+                    continue
+                for j in jr.judges:
+                    score_str = j.score if j.score is not None else "?"
+                    if j.parse_error:
+                        console.print(
+                            f"  [magenta dim]judge {j.model}: parse error - "
+                            f"{j.parse_error}[/magenta dim]"
+                        )
+                    else:
+                        console.print(
+                            f"  [magenta dim]judge {j.model} ({score_str}/10): "
+                            f"{j.reasoning}[/magenta dim]"
+                        )
+                # Mode-only judging: one verdict per cell, no need to repeat.
+                if runs > 1 and not hallucination_mode:
+                    break
+        console.print()
+
+    console.print(f"[dim]Total cost across all runs: ${grand_total_cost:.6f}[/dim]")
+    if judge_results is not None:
+        j_cost = total_judge_cost(judge_results)
+        j_calls = total_judge_calls(judge_results)
+        console.print(
+            f"[dim]Judge cost: ${j_cost:.6f} "
+            f"({j_calls} judge call{'s' if j_calls != 1 else ''})[/dim]"
+        )
+    if hallucination_mode and hallucination_facts:
+        console.print(
+            f"[dim]Hallucination check: "
+            f"{len(hallucination_facts)} reference fact"
+            f"{'s' if len(hallucination_facts) != 1 else ''} provided[/dim]"
+        )
+    console.print(
+        "[dim]Coefficient of variation (CV) < 0.05 indicates stable model behavior.[/dim]"
+    )
+    console.print(f"[dim]{pricing_freshness_note()}[/dim]")
+
+    if significance_results:
+        _display_significance(significance_results)
+
+
+def _display_significance(significance_results: list) -> None:
+    """Render pairwise statistical significance results below the runs table.
+
+    Display strategy depends on the number of models:
+      * 2 models: single-line summary
+      * 3-5 models: matrix table
+      * 6+ models: top-K significant pairs (full matrix in JSON)
+    """
+    if not significance_results:
+        return
+
+    models = sorted(
+        {r.model_a for r in significance_results}
+        | {r.model_b for r in significance_results}
+    )
+    n_models = len(models)
+    first = significance_results[0]
+
+    console.print()
+    console.print("[bold]Statistical Significance Tests[/bold]")
+    console.print(
+        f"[dim]Metric: {first.metric} | Test: {first.test_used} | "
+        f"Correction: {first.correction_method} | Threshold: p < {first.threshold}[/dim]"
+    )
+
+    if n_models == 2:
+        r = significance_results[0]
+        if r.p_value is None:
+            console.print(
+                f"  {r.model_a} vs {r.model_b}: {r.test_used} (no p-value)"
+            )
+        else:
+            sig_marker = "*" if r.significant_at_threshold else ""
+            p_display = (
+                r.p_value_corrected if r.p_value_corrected is not None else r.p_value
+            )
+            d_text = (
+                f", d={r.effect_size:.3f} ({r.effect_size_interpretation})"
+                if r.effect_size is not None
+                else ""
+            )
+            console.print(
+                f"  {r.model_a} (avg {r.mean_a:.3f}) vs "
+                f"{r.model_b} (avg {r.mean_b:.3f}): "
+                f"p={p_display:.4f}{sig_marker}{d_text}"
+            )
+        return
+
+    if n_models <= 5:
+        table = Table(title="Pairwise p-values (corrected)", border_style="dim")
+        table.add_column("Model", style="cyan")
+        for m in models:
+            table.add_column(m, justify="right")
+
+        result_map: dict[tuple[str, str], object] = {}
+        for r in significance_results:
+            result_map[(r.model_a, r.model_b)] = r
+            result_map[(r.model_b, r.model_a)] = r
+
+        for m_a in models:
+            row = [m_a]
+            for m_b in models:
+                if m_a == m_b:
+                    row.append("-")
+                    continue
+                r = result_map.get((m_a, m_b))
+                if r is None or r.p_value is None:  # type: ignore[union-attr]
+                    row.append("-")
+                else:
+                    p = (
+                        r.p_value_corrected  # type: ignore[union-attr]
+                        if r.p_value_corrected is not None  # type: ignore[union-attr]
+                        else r.p_value  # type: ignore[union-attr]
+                    )
+                    marker = "*" if r.significant_at_threshold else ""  # type: ignore[union-attr]
+                    row.append(f"{p:.4f}{marker}")
+            table.add_row(*row)
+
+        console.print(table)
+        console.print("[dim]* = significant after correction[/dim]")
+        return
+
+    # 6+ models: top-K significant
+    significant = [r for r in significance_results if r.significant_at_threshold]
+    significant.sort(key=lambda x: x.p_value_corrected or 1.0)
+    top_k = significant[:5]
+
+    if top_k:
+        console.print(
+            f"[bold]Top significant pairs (of {len(significant)} total):[/bold]"
+        )
+        for i, r in enumerate(top_k, 1):
+            p = r.p_value_corrected if r.p_value_corrected is not None else r.p_value
+            d_text = (
+                f", d={r.effect_size:.3f} ({r.effect_size_interpretation})"
+                if r.effect_size is not None
+                else ""
+            )
+            console.print(
+                f"  {i}. {r.model_a} vs {r.model_b}: p={p:.4f}{d_text}"
+            )
+    else:
+        console.print("[dim]No statistically significant pairs found.[/dim]")
+
+    console.print("[dim]Full matrix available in JSON output.[/dim]")
+
+
 def _score_cell_for_compare(jr: JudgeResult) -> str:
     """Render the Score column cell for the compare command's results table."""
     if not jr.judges:
         if jr.skipped_models:
-            return f"[dim]-[/dim]"
+            return "[dim]-[/dim]"
         return "[dim]-[/dim]"
     successful = [j for j in jr.judges if j.score is not None]
     if not successful:
