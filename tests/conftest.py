@@ -6,6 +6,7 @@ Two autouse fixtures keep tests hermetic:
 
 Tests that need to set an env var should use monkeypatch explicitly.
 """
+
 from __future__ import annotations
 
 import os
@@ -86,7 +87,7 @@ class FakeAsyncStream:
     def __init__(self, chunks: list[Any]) -> None:
         self._chunks = chunks
 
-    def __aiter__(self) -> "FakeAsyncStream":
+    def __aiter__(self) -> FakeAsyncStream:
         self._iter = iter(self._chunks)
         return self
 
