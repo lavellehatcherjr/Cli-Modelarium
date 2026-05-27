@@ -1,4 +1,5 @@
 """Tests for cli_modelarium.security."""
+
 from __future__ import annotations
 
 import pytest
@@ -93,9 +94,7 @@ class TestRedactSecrets:
         assert "REDACTED" in redacted
 
     def test_multiple_secrets_in_one_string(self) -> None:
-        message = (
-            "Error: sk-proj-aaaaaaaaaaaaaaaaaaaa and sk-ant-bbbbbbbbbbbbbbbbbbbb both failed"
-        )
+        message = "Error: sk-proj-aaaaaaaaaaaaaaaaaaaa and sk-ant-bbbbbbbbbbbbbbbbbbbb both failed"
         redacted = security.redact_secrets(message)
         assert "aaaa" not in redacted
         assert "bbbb" not in redacted
@@ -138,17 +137,22 @@ class TestKeyringIntegration:
         assert security.load_key("openai") is None
 
     def test_delete_silent_when_missing(self) -> None:
-        # Should not raise.
-        security.delete_key("openai")
+        assert security.delete_key("openai") is False
 
     def test_delete_removes_existing(self) -> None:
         security.save_key("openai", "sk-proj-test1234567890abcdefghi")
-        security.delete_key("openai")
+        assert security.delete_key("openai") is True
         assert security.load_key("openai") is None
 
-    def test_env_var_takes_precedence_over_keychain(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_delete_local_url_returns_false_when_missing(self) -> None:
+        assert security.delete_local_url() is False
+
+    def test_delete_local_url_returns_true_when_existing(self) -> None:
+        security.save_local_url("http://localhost:1234/v1")
+        assert security.delete_local_url() is True
+        assert security.load_local_url() is None
+
+    def test_env_var_takes_precedence_over_keychain(self, monkeypatch: pytest.MonkeyPatch) -> None:
         security.save_key("openai", "sk-proj-kerring1234567890abcdefghi")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-fromenv1234567890abcdefghi")
         assert security.load_key("openai") == "sk-proj-fromenv1234567890abcdefghi"
