@@ -5,6 +5,7 @@ base URL (and, for OpenRouter, extra default headers). These tests verify
 the subclasses correctly forward those values to the AsyncOpenAI constructor
 and inherit all other behavior from OpenAIProvider.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -17,7 +18,6 @@ from cli_modelarium.providers.openai_provider import OpenAIProvider
 from cli_modelarium.providers.openrouter_provider import OpenRouterProvider
 from cli_modelarium.providers.xai_provider import XAIProvider
 
-
 SUBCLASSES = [
     (XAIProvider, "xai", "https://api.x.ai/v1"),
     (DeepSeekProvider, "deepseek", "https://api.deepseek.com/v1"),
@@ -27,23 +27,17 @@ SUBCLASSES = [
 
 
 @pytest.mark.parametrize("cls,expected_name,expected_url", SUBCLASSES)
-def test_inherits_from_openai_provider(
-    cls: type, expected_name: str, expected_url: str
-) -> None:
+def test_inherits_from_openai_provider(cls: type, expected_name: str, expected_url: str) -> None:
     assert issubclass(cls, OpenAIProvider)
 
 
 @pytest.mark.parametrize("cls,expected_name,expected_url", SUBCLASSES)
-def test_provider_name(
-    cls: type, expected_name: str, expected_url: str
-) -> None:
+def test_provider_name(cls: type, expected_name: str, expected_url: str) -> None:
     assert cls.name == expected_name
 
 
 @pytest.mark.parametrize("cls,expected_name,expected_url", SUBCLASSES)
-def test_base_url_set_on_class(
-    cls: type, expected_name: str, expected_url: str
-) -> None:
+def test_base_url_set_on_class(cls: type, expected_name: str, expected_url: str) -> None:
     assert cls.BASE_URL == expected_url
 
 
