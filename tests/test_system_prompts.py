@@ -7,6 +7,7 @@ Security model under test:
     * symlink target size is what counts (Path.stat follows symlinks)
     * path traversal is NOT blocked - users explicitly pick the path
 """
+
 from __future__ import annotations
 
 import os
@@ -24,9 +25,7 @@ from cli_modelarium.io_safety import (
 class TestLoadSystemPrompt:
     def test_valid_utf8_with_whitespace(self, tmp_path: Path) -> None:
         path = tmp_path / "prompt.txt"
-        path.write_text(
-            "  You are a helpful assistant.\nBe concise.\n  ", encoding="utf-8"
-        )
+        path.write_text("  You are a helpful assistant.\nBe concise.\n  ", encoding="utf-8")
 
         result = load_system_prompt(str(path))
 
@@ -106,9 +105,7 @@ class TestLoadSystemPrompt:
         result = load_system_prompt(str(traversal_path))
         assert result == "loaded via traversal"
 
-    def test_symlink_to_large_file_size_check_still_works(
-        self, tmp_path: Path
-    ) -> None:
+    def test_symlink_to_large_file_size_check_still_works(self, tmp_path: Path) -> None:
         """Path.stat() follows symlinks, so a symlink to an oversize file
         is still caught by the size guard.
         """
