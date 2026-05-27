@@ -4,6 +4,7 @@ Designed to be subclassed by the OpenAI-compatible providers (xAI, DeepSeek,
 Groq, OpenRouter, Local) by overriding `name`, the constructor (to pass a
 different base_url), and optionally `_transform_model()`.
 """
+
 from __future__ import annotations
 
 import time
@@ -47,9 +48,7 @@ class OpenAIProvider(BaseProvider):
         """Subclass hook for providers that need to rewrite the model ID (e.g. LocalProvider)."""
         return model
 
-    def _build_messages(
-        self, prompt: str, system_prompt: str | None
-    ) -> list[dict[str, str]]:
+    def _build_messages(self, prompt: str, system_prompt: str | None) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
