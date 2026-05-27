@@ -14,6 +14,7 @@ This module owns the per-call lifecycle for a comparison run:
 both `--stream` and `--no-stream` through it - the only difference is
 whether the Live display is enabled (`live_display=False` for --no-stream).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,6 +39,12 @@ from cli_modelarium.security import redact_secrets
 
 DEFAULT_CONCURRENCY = 5
 DEFAULT_MAX_RETRIES = 3
+
+# Auto-collapse threshold for the live streaming display. Above this many
+# concurrent tasks the per-task panels won't fit on a normal terminal, so
+# we silently disable Live and print a one-line notice. The user can force
+# the expanded view back on with --show-all-runs.
+AUTO_COLLAPSE_TASK_THRESHOLD = 12
 
 # Backoff schedule for 429 rate limits. Used when the response has no
 # retry-after header. When the header is present, we honor it verbatim and
@@ -72,6 +79,7 @@ class StreamState:
     provider_name: str
     temperature: float
     system_prompt: str | None = None
+    run_index: int = 0
     status: Status = "pending"
     text: str = ""
     ttft_ms: float | None = None
@@ -172,9 +180,7 @@ class StreamingDisplay:
         elif state.status == "waiting":
             status_text = "[cyan]connecting...[/cyan]"
         elif state.status == "streaming":
-            ttft_text = (
-                f"TTFT {state.ttft_ms / 1000:.2f}s" if state.ttft_ms is not None else ""
-            )
+            ttft_text = f"TTFT {state.ttft_ms / 1000:.2f}s" if state.ttft_ms is not None else ""
             status_text = f"[cyan]streaming[/cyan]  [dim]{ttft_text}[/dim]"
         elif state.status == "retrying":
             status_text = f"[yellow]{state.retry_message or 'retrying'}[/yellow]"
@@ -202,10 +208,7 @@ class StreamingDisplay:
             if idx is not None:
                 sp_marker = f"  [magenta]SP {idx}[/magenta]"
 
-        title = (
-            f"[bold]{state.model}[/bold] @ {state.temperature:.1f}"
-            f"{sp_marker}   {status_text}"
-        )
+        title = f"[bold]{state.model}[/bold] @ {state.temperature:.1f}{sp_marker}   {status_text}"
 
         if state.error:
             body = f"[red]{state.error}[/red]"
@@ -231,7 +234,7 @@ async def _call_with_retry(
     state: StreamState,
     prompt: str,
     max_retries: int,
-    sleep: Callable[[float], "asyncio.Future[None]"] = asyncio.sleep,
+    sleep: Callable[[float], asyncio.Future[None]] = asyncio.sleep,
 ) -> CompletionResult:
     """Run `provider.complete()` with 429/529 retry, updating state.
 
@@ -285,7 +288,7 @@ async def _run_one(
     prompt: str,
     semaphore: asyncio.Semaphore,
     max_retries: int,
-    sleep: Callable[[float], "asyncio.Future[None]"] = asyncio.sleep,
+    sleep: Callable[[float], asyncio.Future[None]] = asyncio.sleep,
 ) -> None:
     """Run a single task to completion: semaphore -> retry loop -> state update."""
     async with semaphore:
@@ -316,7 +319,9 @@ async def run_streaming_comparison(
     concurrency: int = DEFAULT_CONCURRENCY,
     max_retries: int = DEFAULT_MAX_RETRIES,
     live_display: bool = True,
-    sleep: Callable[[float], "asyncio.Future[None]"] = asyncio.sleep,
+    runs: int = 1,
+    show_all_runs: bool = False,
+    sleep: Callable[[float], asyncio.Future[None]] = asyncio.sleep,
 ) -> list[StreamState]:
     """Run every (system_prompt x model x temperature) call in parallel.
 
@@ -349,20 +354,31 @@ async def run_streaming_comparison(
         for model in models:
             provider_name = get_provider_for_model(model)
             for temperature in temperatures:
-                states.append(
-                    StreamState(
-                        model=model,
-                        provider_name=provider_name,
-                        temperature=temperature,
-                        system_prompt=sp,
+                for run_idx in range(runs):
+                    states.append(
+                        StreamState(
+                            model=model,
+                            provider_name=provider_name,
+                            temperature=temperature,
+                            system_prompt=sp,
+                            run_index=run_idx,
+                        )
                     )
-                )
+
+    # Auto-collapse: too many concurrent panels won't fit on a normal
+    # terminal. Disable Live and print a one-line notice. --show-all-runs
+    # forces the expanded view back on.
+    if live_display and not show_all_runs and len(states) > AUTO_COLLAPSE_TASK_THRESHOLD:
+        live_display = False
+        console = console or Console()
+        console.print(
+            "[dim]Many concurrent tasks; live display disabled "
+            "(use --show-all-runs to expand).[/dim]"
+        )
 
     # One instance per provider, one semaphore per provider.
     provider_names = sorted({s.provider_name for s in states})
-    instances: dict[str, BaseProvider] = {
-        name: provider_factory(name) for name in provider_names
-    }
+    instances: dict[str, BaseProvider] = {name: provider_factory(name) for name in provider_names}
     semaphores: dict[str, asyncio.Semaphore] = {
         name: asyncio.Semaphore(concurrency) for name in provider_names
     }
