@@ -11,6 +11,7 @@ Streaming uses the `messages.stream()` async context manager. The final
 usage payload (input/output/cache-read tokens) is read after iteration
 via `stream.get_final_message()`.
 """
+
 from __future__ import annotations
 
 import time
