@@ -16,12 +16,13 @@ This module deliberately reuses the Phase 8 judging machinery rather than
 forking it - the only judging-side additions are the optional `risk_level`
 field on `JudgeScore` and `aggregated_risk_level` on `JudgeResult`.
 """
+
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 
-from cli_modelarium.exceptions import BatchValidationError, ModelariumError
+from cli_modelarium.exceptions import BatchValidationError
 from cli_modelarium.io_safety import safe_input_path, split_escaped_csv
 from cli_modelarium.judging import (
     JudgeResult,
@@ -37,7 +38,8 @@ from cli_modelarium.judging import (
 # HALLUCINATION_WITHOUT_FACTS. The literal `{"score": ...}` braces in the
 # response-format line do NOT need escaping because we use `.replace()`,
 # not `.format()`.
-HALLUCINATION_CRITERIA_BASE = """\
+HALLUCINATION_CRITERIA_BASE = (
+    """\
 Evaluate the response for hallucination risk. Check:
 1. Factual accuracy of claimed facts (dates, names, statistics)
 2. Whether the response invents specific details (fake citations, quotes, sources)
@@ -51,7 +53,11 @@ Rate hallucination risk on 1-10:
 - 4-6 = Some incorrect or unverifiable claims
 - 1-3 = Multiple incorrect claims or fabricated details
 
-Respond ONLY with JSON: {"score": <1-10>, "risk_level": "Low" | "Medium" | "High", "reasoning": "<one sentence>"}"""
+"""
+    "Respond ONLY with JSON: "
+    '{"score": <1-10>, "risk_level": "Low" | "Medium" | "High", '
+    '"reasoning": "<one sentence>"}'
+)
 
 HALLUCINATION_WITH_FACTS = """\
 Verify whether the response is consistent with these known facts:
@@ -185,9 +191,7 @@ def build_hallucination_criteria(facts: list[str] | None) -> list[str]:
         reference_check = HALLUCINATION_WITH_FACTS.replace("{facts}", bullets)
     else:
         reference_check = HALLUCINATION_WITHOUT_FACTS
-    filled = HALLUCINATION_CRITERIA_BASE.replace(
-        "{reference_check}", reference_check
-    )
+    filled = HALLUCINATION_CRITERIA_BASE.replace("{reference_check}", reference_check)
     return [filled]
 
 
@@ -220,14 +224,9 @@ def parse_hallucination_response(text: str) -> dict:
             if normalized in _RISK_LEVELS:
                 risk_level = normalized
             else:
-                risk_error = (
-                    f"invalid risk_level {raw_rl!r}; "
-                    f"must be one of {sorted(_RISK_LEVELS)}"
-                )
+                risk_error = f"invalid risk_level {raw_rl!r}; must be one of {sorted(_RISK_LEVELS)}"
         else:
-            risk_error = (
-                f"risk_level must be a string, got {type(raw_rl).__name__}"
-            )
+            risk_error = f"risk_level must be a string, got {type(raw_rl).__name__}"
     else:
         # Not in the JSON - derive from score per spec.
         risk_level = risk_level_from_score(base["score"])
