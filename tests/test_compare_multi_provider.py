@@ -8,12 +8,11 @@ fakes directly, then verify the orchestration code:
     * runs all calls in parallel
     * one provider failure does not kill the others
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import replace
-
-import pytest
 
 from cli_modelarium.exceptions import ProviderError
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
@@ -66,7 +65,9 @@ class _RecordingProvider(BaseProvider):
 
 async def test_runs_three_providers_in_parallel() -> None:
     fakes = {
-        "openai": _RecordingProvider("openai", CompletionResult(output="oa out", provider="openai")),
+        "openai": _RecordingProvider(
+            "openai", CompletionResult(output="oa out", provider="openai")
+        ),
         "anthropic": _RecordingProvider(
             "anthropic", CompletionResult(output="ant out", provider="anthropic")
         ),
@@ -97,9 +98,7 @@ async def test_one_failure_does_not_kill_others() -> None:
         "anthropic": _RecordingProvider(
             "anthropic", ProviderError("server died", provider="anthropic")
         ),
-        "google": _RecordingProvider(
-            "google", CompletionResult(output="ok2", provider="google")
-        ),
+        "google": _RecordingProvider("google", CompletionResult(output="ok2", provider="google")),
     }
 
     states = await run_streaming_comparison(
@@ -127,9 +126,7 @@ async def test_one_provider_instance_per_provider_not_per_model() -> None:
 
     def make(name: str) -> _RecordingProvider:
         instantiations[name] = instantiations.get(name, 0) + 1
-        provider = _RecordingProvider(
-            name, CompletionResult(output=f"{name} ok", provider=name)
-        )
+        provider = _RecordingProvider(name, CompletionResult(output=f"{name} ok", provider=name))
         fakes[name] = provider
         return provider
 
