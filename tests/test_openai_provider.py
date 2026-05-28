@@ -4,6 +4,7 @@ The AsyncOpenAI client is replaced wholesale before instantiation. The fakes
 mirror just the surface the provider touches: `client.chat.completions.create()`
 returning an async-iterable stream.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,7 +21,6 @@ from cli_modelarium.exceptions import (
 )
 from cli_modelarium.providers._utils import extract_retry_after
 from cli_modelarium.providers.openai_provider import OpenAIProvider
-
 
 # ===== fake client plumbing =====
 
@@ -59,9 +59,7 @@ def _make_provider(
     def fake_async_openai(**_kwargs: Any) -> _FakeClient:
         return _FakeClient(completions)
 
-    monkeypatch.setattr(
-        "cli_modelarium.providers.openai_provider.AsyncOpenAI", fake_async_openai
-    )
+    monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", fake_async_openai)
     provider = OpenAIProvider(api_key="sk-proj-test1234567890abcdefghi")
     return provider, completions
 
@@ -147,9 +145,7 @@ async def test_system_prompt_prepended(
     stream = fake_openai_stream(text_chunks=["ok"], input_tokens=1, output_tokens=1)
     provider, completions = _make_provider(monkeypatch, response=stream)
 
-    await provider.complete(
-        "user prompt", "gpt-5.5", 0.0, system_prompt="you are helpful"
-    )
+    await provider.complete("user prompt", "gpt-5.5", 0.0, system_prompt="you are helpful")
 
     messages = completions.last_kwargs["messages"]
     assert messages == [
@@ -327,9 +323,7 @@ def test_base_url_forwarded_to_client(monkeypatch: pytest.MonkeyPatch) -> None:
         captured.update(kwargs)
         return _FakeClient(_FakeCompletions())
 
-    monkeypatch.setattr(
-        "cli_modelarium.providers.openai_provider.AsyncOpenAI", capture
-    )
+    monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", capture)
 
     OpenAIProvider(api_key="sk-proj-test1234567890abcdefghi", base_url="https://example.invalid/v1")
 
@@ -344,9 +338,7 @@ def test_no_base_url_omitted_from_kwargs(monkeypatch: pytest.MonkeyPatch) -> Non
         captured.update(kwargs)
         return _FakeClient(_FakeCompletions())
 
-    monkeypatch.setattr(
-        "cli_modelarium.providers.openai_provider.AsyncOpenAI", capture
-    )
+    monkeypatch.setattr("cli_modelarium.providers.openai_provider.AsyncOpenAI", capture)
 
     OpenAIProvider(api_key="sk-proj-test1234567890abcdefghi")
 
