@@ -7,6 +7,7 @@ resolves to an AsyncIterator of CompletionEvent objects. Each event's
 
 Errors raise SDKError, which wraps an httpx response we read the status code from.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -23,7 +24,6 @@ from cli_modelarium.exceptions import (
 )
 from cli_modelarium.providers.mistral_provider import MistralProvider
 
-
 # ===== fake plumbing =====
 
 
@@ -39,7 +39,7 @@ class _FakeAsyncIterator:
     def __init__(self, events: list[Any]) -> None:
         self._events = events
 
-    def __aiter__(self) -> "_FakeAsyncIterator":
+    def __aiter__(self) -> _FakeAsyncIterator:
         self._iter = iter(self._events)
         return self
 
@@ -51,9 +51,7 @@ class _FakeAsyncIterator:
 
 
 class _FakeChat:
-    def __init__(
-        self, events: list[Any] | None = None, error: Exception | None = None
-    ) -> None:
+    def __init__(self, events: list[Any] | None = None, error: Exception | None = None) -> None:
         self._events = events
         self._error = error
         self.last_kwargs: dict[str, Any] = {}
@@ -70,9 +68,7 @@ class _FakeClient:
         self.chat = chat
 
 
-def _build_events(
-    texts: list[str], input_tokens: int = 0, output_tokens: int = 0
-) -> list[Any]:
+def _build_events(texts: list[str], input_tokens: int = 0, output_tokens: int = 0) -> list[Any]:
     events = [_make_event(text=t) for t in texts]
     usage = SimpleNamespace(prompt_tokens=input_tokens, completion_tokens=output_tokens)
     events.append(_make_event(text=None, usage=usage))
@@ -89,9 +85,7 @@ def _make_provider(
     def fake_mistral_factory(**_kwargs: Any) -> _FakeClient:
         return _FakeClient(chat)
 
-    monkeypatch.setattr(
-        "cli_modelarium.providers.mistral_provider.Mistral", fake_mistral_factory
-    )
+    monkeypatch.setattr("cli_modelarium.providers.mistral_provider.Mistral", fake_mistral_factory)
     provider = MistralProvider(api_key="abc123XYZ456DEF789ghi0jkl")
     return provider, chat
 
