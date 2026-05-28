@@ -1,0 +1,14 @@
+[
+  {
+    "id": "moon_landing",
+    "prompt": "When was the first moon landing and who was the first person to walk on the moon?"
+  },
+  {
+    "id": "shakespeare",
+    "prompt": "What year was Shakespeare born and what is his most famous play?"
+  },
+  {
+    "id": "tech_history",
+    "prompt": "When was the first iPhone released and who was Apple's CEO at the time?"
+  }
+]
