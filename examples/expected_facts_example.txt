@@ -1,0 +1,7 @@
+# Reference facts for hallucination check.
+# One fact per line; lines starting with # are comments.
+
+The first moon landing was July 20, 1969
+Neil Armstrong was the first person to walk on the moon
+Apollo 11 was the mission name
+The lunar module was named Eagle
