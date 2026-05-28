@@ -4,10 +4,10 @@ Strategy: monkeypatch `_get_provider_instance` to return a fake that records
 every call and returns a deterministic CompletionResult. Then drive the
 command via Click's CliRunner with various flag combinations.
 """
+
 from __future__ import annotations
 
 import csv
-import io
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,7 +18,6 @@ from click.testing import CliRunner
 
 from cli_modelarium.cli import main as cli_main
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
-
 
 # ===== fake provider =====
 
@@ -109,9 +108,12 @@ class TestBasicBatchFlow:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--output", str(output),
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--output",
+                str(output),
             ],
         )
 
@@ -134,9 +136,12 @@ class TestBasicBatchFlow:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--output", str(output),
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--output",
+                str(output),
             ],
         )
 
@@ -159,10 +164,14 @@ class TestBasicBatchFlow:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--output", str(output),
-                "--output-format", "json",
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--output",
+                str(output),
+                "--output-format",
+                "json",
             ],
         )
 
@@ -202,9 +211,7 @@ class TestOutputFileValidation:
         # Click's exists=True catches this.
         assert "does not exist" in result.output.lower() or "not found" in result.output.lower()
 
-    def test_missing_models_flag(
-        self, fake_provider: _RecordingProvider, tmp_path: Path
-    ) -> None:
+    def test_missing_models_flag(self, fake_provider: _RecordingProvider, tmp_path: Path) -> None:
         prompts_file = tmp_path / "p.txt"
         _write_txt(prompts_file, ["hi"])
 
@@ -227,9 +234,12 @@ class TestOutputFileValidation:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--output", str(existing),
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--output",
+                str(existing),
             ],
         )
 
@@ -251,9 +261,12 @@ class TestOutputFileValidation:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--output", str(existing),
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--output",
+                str(existing),
                 "--force",
             ],
         )
@@ -273,9 +286,12 @@ class TestOutputFileValidation:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--output", str(prompts_file),
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--output",
+                str(prompts_file),
                 "--force",
             ],
         )
@@ -303,9 +319,12 @@ class TestPerPromptSystemOverride:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--system-prompt", "command-line-system",
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--system-prompt",
+                "command-line-system",
             ],
         )
 
@@ -333,9 +352,12 @@ class TestMaxCost:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--max-cost", "0.001",
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--max-cost",
+                "0.001",
             ],
         )
 
@@ -354,9 +376,12 @@ class TestMaxCost:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--max-cost", "10.0",
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--max-cost",
+                "10.0",
             ],
         )
 
@@ -420,9 +445,12 @@ class TestMatrixExpansion:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5,gpt-5.4",
-                "--temperatures", "0.0,1.0",
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5,gpt-5.4",
+                "--temperatures",
+                "0.0,1.0",
             ],
         )
 
