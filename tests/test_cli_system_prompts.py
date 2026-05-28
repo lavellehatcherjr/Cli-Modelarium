@@ -8,6 +8,7 @@ Covers:
     * --system-prompt-file loads file content and applies it
     * --system-prompt-file with missing file gives clear error, exits 2
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -17,9 +18,9 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from cli_modelarium.cli import _split_system_prompts, main as cli_main
+from cli_modelarium.cli import _split_system_prompts
+from cli_modelarium.cli import main as cli_main
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
-
 
 # ===== a recording fake provider that survives any model name =====
 
@@ -61,9 +62,7 @@ class _RecordingProvider(BaseProvider):
         )
         if on_chunk is not None:
             on_chunk("ok")
-        return CompletionResult(
-            output="ok", model=model, provider="fake", temperature=temperature
-        )
+        return CompletionResult(output="ok", model=model, provider="fake", temperature=temperature)
 
 
 @pytest.fixture
@@ -120,8 +119,10 @@ class TestSystemPromptFlag:
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--system-prompt", "you are a poet",
+                "--models",
+                "gpt-5.5",
+                "--system-prompt",
+                "you are a poet",
                 "--no-stream",
             ],
         )
@@ -130,9 +131,7 @@ class TestSystemPromptFlag:
         assert len(fake_provider.calls) == 1
         assert fake_provider.calls[0]["system_prompt"] == "you are a poet"
 
-    def test_empty_string_treated_as_no_prompt(
-        self, fake_provider: _RecordingProvider
-    ) -> None:
+    def test_empty_string_treated_as_no_prompt(self, fake_provider: _RecordingProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
@@ -156,8 +155,10 @@ class TestSystemPromptsMatrix:
             cli_main,
             [
                 "user prompt",
-                "--models", "gpt-5.5,gpt-5.4",
-                "--system-prompts", "p1,p2,p3",
+                "--models",
+                "gpt-5.5,gpt-5.4",
+                "--system-prompts",
+                "p1,p2,p3",
                 "--no-stream",
             ],
         )
@@ -171,17 +172,18 @@ class TestSystemPromptsMatrix:
         models_seen = {c["model"] for c in fake_provider.calls}
         assert models_seen == {"gpt-5.5", "gpt-5.4"}
 
-    def test_temperature_dimension_multiplies(
-        self, fake_provider: _RecordingProvider
-    ) -> None:
+    def test_temperature_dimension_multiplies(self, fake_provider: _RecordingProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "p",
-                "--models", "gpt-5.5",
-                "--temperatures", "0.0,1.0",
-                "--system-prompts", "a,b",
+                "--models",
+                "gpt-5.5",
+                "--temperatures",
+                "0.0,1.0",
+                "--system-prompts",
+                "a,b",
                 "--no-stream",
             ],
         )
@@ -200,8 +202,10 @@ class TestSystemPromptsMatrix:
             cli_main,
             [
                 "p",
-                "--models", "gpt-5.5",
-                "--system-prompts", r"a,b,c\,d",
+                "--models",
+                "gpt-5.5",
+                "--system-prompts",
+                r"a,b,c\,d",
                 "--no-stream",
             ],
         )
@@ -223,9 +227,12 @@ class TestMutualExclusion:
             cli_main,
             [
                 "p",
-                "--models", "gpt-5.5",
-                "--system-prompt", "single",
-                "--system-prompts", "a,b",
+                "--models",
+                "gpt-5.5",
+                "--system-prompt",
+                "single",
+                "--system-prompts",
+                "a,b",
                 "--no-stream",
             ],
         )
@@ -245,9 +252,12 @@ class TestMutualExclusion:
             cli_main,
             [
                 "p",
-                "--models", "gpt-5.5",
-                "--system-prompt", "inline",
-                "--system-prompt-file", str(prompt_file),
+                "--models",
+                "gpt-5.5",
+                "--system-prompt",
+                "inline",
+                "--system-prompt-file",
+                str(prompt_file),
                 "--no-stream",
             ],
         )
@@ -266,9 +276,12 @@ class TestMutualExclusion:
             cli_main,
             [
                 "p",
-                "--models", "gpt-5.5",
-                "--system-prompts", "a,b",
-                "--system-prompt-file", str(prompt_file),
+                "--models",
+                "gpt-5.5",
+                "--system-prompts",
+                "a,b",
+                "--system-prompt-file",
+                str(prompt_file),
                 "--no-stream",
             ],
         )
@@ -281,21 +294,19 @@ class TestMutualExclusion:
 
 
 class TestSystemPromptFile:
-    def test_loads_and_applies(
-        self, fake_provider: _RecordingProvider, tmp_path: Path
-    ) -> None:
+    def test_loads_and_applies(self, fake_provider: _RecordingProvider, tmp_path: Path) -> None:
         prompt_file = tmp_path / "system.txt"
-        prompt_file.write_text(
-            "  You are a research assistant.  \n", encoding="utf-8"
-        )
+        prompt_file.write_text("  You are a research assistant.  \n", encoding="utf-8")
 
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "user prompt",
-                "--models", "gpt-5.5",
-                "--system-prompt-file", str(prompt_file),
+                "--models",
+                "gpt-5.5",
+                "--system-prompt-file",
+                str(prompt_file),
                 "--no-stream",
             ],
         )
@@ -314,8 +325,10 @@ class TestSystemPromptFile:
             cli_main,
             [
                 "p",
-                "--models", "gpt-5.5",
-                "--system-prompt-file", str(missing),
+                "--models",
+                "gpt-5.5",
+                "--system-prompt-file",
+                str(missing),
                 "--no-stream",
             ],
         )
