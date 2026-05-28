@@ -124,8 +124,13 @@ class TestLoadSystemPrompt:
         assert "too large" in str(exc_info.value).lower()
 
     def test_tilde_expansion(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """~ in the path expands to the user's home (verified via $HOME override)."""
+        """~ in the path expands to the user's home (cross-platform).
+
+        Path.expanduser() uses $HOME on Unix but %USERPROFILE% on Windows,
+        so set both to make the test pass on every platform.
+        """
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         path = tmp_path / "from_home.txt"
         path.write_text("expanded", encoding="utf-8")
 
