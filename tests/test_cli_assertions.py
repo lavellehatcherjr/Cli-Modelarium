@@ -4,6 +4,7 @@ Verifies the exit-code contract (0/1/2), output formatter integration,
 and that --no-assertions, --min-pass-rate, and --strict-assertions all
 behave per the spec.
 """
+
 from __future__ import annotations
 
 import csv
@@ -17,7 +18,6 @@ from click.testing import CliRunner
 
 from cli_modelarium.cli import main as cli_main
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
-
 
 # ===== fake provider that returns a controllable response =====
 
@@ -84,17 +84,21 @@ def _write_json(path: Path, items: list[dict]) -> None:
 
 
 class TestExitCodeZeroAllPass:
-    def test_all_passing_assertions(
-        self, canned_provider: _CannedProvider, tmp_path: Path
-    ) -> None:
+    def test_all_passing_assertions(self, canned_provider: _CannedProvider, tmp_path: Path) -> None:
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "what is the capital of France?",
-             "assertions": [
-                 {"type": "contains", "value": "Paris"},
-                 {"type": "max_length_chars", "value": 1000},
-             ]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "what is the capital of France?",
+                    "assertions": [
+                        {"type": "contains", "value": "Paris"},
+                        {"type": "max_length_chars", "value": 1000},
+                    ],
+                },
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -113,10 +117,16 @@ class TestExitCodeOneAssertionFail:
         self, canned_provider: _CannedProvider, tmp_path: Path
     ) -> None:
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x",
-             "assertions": [{"type": "contains", "value": "MISSING"}]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [{"type": "contains", "value": "MISSING"}],
+                },
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -131,12 +141,19 @@ class TestExitCodeOneAssertionFail:
     ) -> None:
         """50% pass rate against --min-pass-rate 0.5 must FAIL (strictly above)."""
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x", "assertions": [
-                {"type": "contains", "value": "Paris"},      # pass
-                {"type": "contains", "value": "MISSING"},    # fail
-            ]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [
+                        {"type": "contains", "value": "Paris"},  # pass
+                        {"type": "contains", "value": "MISSING"},  # fail
+                    ],
+                },
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -151,12 +168,19 @@ class TestExitCodeOneAssertionFail:
     ) -> None:
         """pass_rate >= threshold means OK. At exactly 50% with --min-pass-rate 0.5 → 0."""
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x", "assertions": [
-                {"type": "contains", "value": "Paris"},
-                {"type": "contains", "value": "MISSING"},
-            ]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [
+                        {"type": "contains", "value": "Paris"},
+                        {"type": "contains", "value": "MISSING"},
+                    ],
+                },
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -172,10 +196,16 @@ class TestExitCodeOneAssertionFail:
     ) -> None:
         """--min-pass-rate 0.0 effectively disables the assertion gate."""
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x",
-             "assertions": [{"type": "contains", "value": "MISSING"}]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [{"type": "contains", "value": "MISSING"}],
+                },
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -195,10 +225,16 @@ class TestNoAssertions:
     ) -> None:
         """--no-assertions means: even configured assertions are skipped."""
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x",
-             "assertions": [{"type": "contains", "value": "MISSING"}]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [{"type": "contains", "value": "MISSING"}],
+                },
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -218,12 +254,19 @@ class TestStrictAssertions:
     ) -> None:
         """Default (no flags): any failure → exit 1, same as --strict-assertions."""
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x", "assertions": [
-                {"type": "contains", "value": "Paris"},
-                {"type": "contains", "value": "MISSING"},
-            ]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [
+                        {"type": "contains", "value": "Paris"},
+                        {"type": "contains", "value": "MISSING"},
+                    ],
+                },
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -242,8 +285,15 @@ class TestStrictAssertions:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
-            ["batch", str(prompts), "--models", "gpt-5.5",
-             "--strict-assertions", "--min-pass-rate", "0.5"],
+            [
+                "batch",
+                str(prompts),
+                "--models",
+                "gpt-5.5",
+                "--strict-assertions",
+                "--min-pass-rate",
+                "0.5",
+            ],
         )
 
         assert result.exit_code != 0
@@ -254,9 +304,7 @@ class TestStrictAssertions:
 
 
 class TestMinPassRateValidation:
-    def test_above_1_rejected(
-        self, canned_provider: _CannedProvider, tmp_path: Path
-    ) -> None:
+    def test_above_1_rejected(self, canned_provider: _CannedProvider, tmp_path: Path) -> None:
         prompts = tmp_path / "p.txt"
         prompts.write_text("hi\n", encoding="utf-8")
         runner = CliRunner()
@@ -267,9 +315,7 @@ class TestMinPassRateValidation:
         assert result.exit_code != 0
         assert "0.0" in result.output and "1.0" in result.output
 
-    def test_below_0_rejected(
-        self, canned_provider: _CannedProvider, tmp_path: Path
-    ) -> None:
+    def test_below_0_rejected(self, canned_provider: _CannedProvider, tmp_path: Path) -> None:
         prompts = tmp_path / "p.txt"
         prompts.write_text("hi\n", encoding="utf-8")
         runner = CliRunner()
@@ -308,10 +354,12 @@ class TestCallFailureDominates:
         )
 
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x",
-             "assertions": [{"type": "contains", "value": "Paris"}]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {"id": "p1", "prompt": "x", "assertions": [{"type": "contains", "value": "Paris"}]},
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -331,12 +379,19 @@ class TestCsvAssertionColumns:
         self, canned_provider: _CannedProvider, tmp_path: Path
     ) -> None:
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x", "assertions": [
-                {"type": "contains", "value": "Paris"},      # pass
-                {"type": "max_length_chars", "value": 5},    # fail
-            ]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [
+                        {"type": "contains", "value": "Paris"},  # pass
+                        {"type": "max_length_chars", "value": 5},  # fail
+                    ],
+                },
+            ],
+        )
         out = tmp_path / "out.csv"
 
         runner = CliRunner()
@@ -359,11 +414,18 @@ class TestJsonAssertionFields:
         self, canned_provider: _CannedProvider, tmp_path: Path
     ) -> None:
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x", "assertions": [
-                {"type": "contains", "value": "Paris"},
-            ]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [
+                        {"type": "contains", "value": "Paris"},
+                    ],
+                },
+            ],
+        )
         out = tmp_path / "out.json"
 
         runner = CliRunner()
@@ -391,11 +453,18 @@ class TestMarkdownAssertionColumn:
         self, canned_provider: _CannedProvider, tmp_path: Path
     ) -> None:
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x", "assertions": [
-                {"type": "contains", "value": "Paris"},
-            ]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [
+                        {"type": "contains", "value": "Paris"},
+                    ],
+                },
+            ],
+        )
         out = tmp_path / "out.md"
 
         runner = CliRunner()
@@ -414,12 +483,19 @@ class TestMarkdownAssertionColumn:
         self, canned_provider: _CannedProvider, tmp_path: Path
     ) -> None:
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x", "assertions": [
-                {"type": "contains", "value": "Paris"},
-                {"type": "max_length_chars", "value": 5},
-            ]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [
+                        {"type": "contains", "value": "Paris"},
+                        {"type": "max_length_chars", "value": 5},
+                    ],
+                },
+            ],
+        )
         out = tmp_path / "out.md"
 
         runner = CliRunner()
@@ -440,7 +516,9 @@ class TestMarkdownAssertionColumn:
 
 class TestJsonschemaMissingExitCode:
     def test_missing_jsonschema_does_not_trigger_exit_1(
-        self, canned_provider: _CannedProvider, monkeypatch: pytest.MonkeyPatch,
+        self,
+        canned_provider: _CannedProvider,
+        monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
         """A json_schema assertion that can't run (no jsonschema installed)
@@ -460,10 +538,16 @@ class TestJsonschemaMissingExitCode:
         monkeypatch.setattr(builtins, "__import__", fake_import)
 
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x",
-             "assertions": [{"type": "json_schema", "value": {"type": "object"}}]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {
+                    "id": "p1",
+                    "prompt": "x",
+                    "assertions": [{"type": "json_schema", "value": {"type": "object"}}],
+                },
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -493,7 +577,7 @@ class TestNineAssertionTypesEndToEnd:
             ({"type": "min_length_chars", "value": 5}, True),
             ({"type": "max_length_chars", "value": 1000}, True),
             ({"type": "latency_under", "value": 1000}, True),  # fake latency 50ms
-            ({"type": "cost_under", "value": 1.0}, True),       # fake cost ~$0.0001
+            ({"type": "cost_under", "value": 1.0}, True),  # fake cost ~$0.0001
         ],
     )
     def test_each_type(
@@ -504,9 +588,12 @@ class TestNineAssertionTypesEndToEnd:
         passing: bool,
     ) -> None:
         prompts = tmp_path / "p.json"
-        _write_json(prompts, [
-            {"id": "p1", "prompt": "x", "assertions": [assertion]},
-        ])
+        _write_json(
+            prompts,
+            [
+                {"id": "p1", "prompt": "x", "assertions": [assertion]},
+            ],
+        )
 
         runner = CliRunner()
         result = runner.invoke(
