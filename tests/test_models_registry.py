@@ -1,4 +1,5 @@
 """Tests for cli_modelarium.models_registry."""
+
 from __future__ import annotations
 
 import pytest
