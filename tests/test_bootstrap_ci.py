@@ -58,11 +58,20 @@ class TestBootstrapCIReproducibility:
         assert (r1.ci_low != r2.ci_low) or (r1.ci_high != r2.ci_high)
 
     def test_no_seed_runs_drift(self) -> None:
-        """Without a seed, repeated runs produce different CIs."""
-        r1 = bootstrap_ci(SAMPLE, seed=None, n_resamples=1000)
-        r2 = bootstrap_ci(SAMPLE, seed=None, n_resamples=1000)
-        # Very unlikely to be byte-identical without a fixed seed.
-        assert not (r1.ci_low == r2.ci_low and r1.ci_high == r2.ci_high)
+        """Without a seed, repeated runs should vary (non-deterministic).
+
+        A single pair can coincidentally match when the sample is small and
+        bounds round to a few decimals, so run several and assert that not
+        all of them are identical.
+        """
+        results = [
+            bootstrap_ci(SAMPLE, seed=None, n_resamples=1000) for _ in range(10)
+        ]
+        distinct_bounds = {(r.ci_low, r.ci_high) for r in results}
+        assert len(distinct_bounds) > 1, (
+            "Expected unseeded bootstrap runs to vary, but all 10 produced "
+            "identical CI bounds"
+        )
 
 
 class TestBootstrapCILevel:
