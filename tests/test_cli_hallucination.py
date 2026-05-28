@@ -4,6 +4,7 @@ Uses a smart fake provider that detects hallucination-judge prompts (by
 the "risk_level" marker in JUDGE_PROMPT_TEMPLATE / HALLUCINATION_CRITERIA_BASE)
 and returns a properly-shaped hallucination JSON response.
 """
+
 from __future__ import annotations
 
 import csv
@@ -17,7 +18,6 @@ from click.testing import CliRunner
 
 from cli_modelarium.cli import main as cli_main
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
-
 
 # ===== fake provider that responds with hallucination JSON =====
 
@@ -60,18 +60,26 @@ class _HallucinationFake(BaseProvider):
     ) -> CompletionResult:
         is_judge = self.JUDGE_MARKER in prompt
         self.calls.append(
-            {"prompt": prompt, "model": model, "temperature": temperature,
-             "is_judge_call": is_judge}
+            {
+                "prompt": prompt,
+                "model": model,
+                "temperature": temperature,
+                "is_judge_call": is_judge,
+            }
         )
         output = self._judge_response if is_judge else f"answer from {model}"
         if on_chunk is not None:
             on_chunk(output)
         return CompletionResult(
             output=output,
-            input_tokens=10, output_tokens=5,
+            input_tokens=10,
+            output_tokens=5,
             cost_usd=0.0001 if is_judge else 0.001,
-            latency_ms=50.0, ttft_ms=10.0,
-            model=model, provider="fake", temperature=temperature,
+            latency_ms=50.0,
+            ttft_ms=10.0,
+            model=model,
+            provider="fake",
+            temperature=temperature,
         )
 
 
@@ -103,7 +111,9 @@ class TestFlagCombinations:
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
+                "test",
+                "--models",
+                "gpt-5.5",
                 "--check-hallucination",
                 "--no-stream",
                 "--no-judge-tos",
@@ -120,9 +130,13 @@ class TestFlagCombinations:
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
-                "--expected-facts", "fact one,fact two",
+                "test",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
+                "--expected-facts",
+                "fact one,fact two",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -130,10 +144,7 @@ class TestFlagCombinations:
         assert result.exit_code != 0
         # Either explicitly mentions --check-hallucination OR refuses
         # with a clear message.
-        assert (
-            "--check-hallucination" in result.output
-            or "require" in result.output.lower()
-        )
+        assert "--check-hallucination" in result.output or "require" in result.output.lower()
 
     def test_facts_and_facts_file_together_rejected(
         self, hallu_provider: _HallucinationFake, tmp_path: Path
@@ -145,11 +156,16 @@ class TestFlagCombinations:
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "test",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
-                "--expected-facts", "a",
-                "--expected-facts-file", str(facts_file),
+                "--expected-facts",
+                "a",
+                "--expected-facts-file",
+                str(facts_file),
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -167,11 +183,16 @@ class TestFlagCombinations:
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "test",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
-                "--expected-facts", "fact one",
-                "--hallucination-template", str(template),
+                "--expected-facts",
+                "fact one",
+                "--hallucination-template",
+                str(template),
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -184,16 +205,16 @@ class TestFlagCombinations:
 
 
 class TestCheckHallucination:
-    def test_with_judge_works_end_to_end(
-        self, hallu_provider: _HallucinationFake
-    ) -> None:
+    def test_with_judge_works_end_to_end(self, hallu_provider: _HallucinationFake) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "Tell me about the Eiffel Tower",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
                 "--no-stream",
                 "--no-judge-tos",
@@ -218,10 +239,13 @@ class TestCheckHallucination:
             cli_main,
             [
                 "Tell me about the Eiffel Tower",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
-                "--expected-facts", "Built 1887-1889,Located in Paris",
+                "--expected-facts",
+                "Built 1887-1889,Located in Paris",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -231,21 +255,24 @@ class TestCheckHallucination:
         assert "Built 1887-1889" in judge_call["prompt"]
         assert "Located in Paris" in judge_call["prompt"]
 
-    def test_expected_facts_file(
-        self, hallu_provider: _HallucinationFake, tmp_path: Path
-    ) -> None:
+    def test_expected_facts_file(self, hallu_provider: _HallucinationFake, tmp_path: Path) -> None:
         facts_file = tmp_path / "facts.txt"
-        facts_file.write_text("# header comment\nDesigned by Gustave Eiffel\nOriginal height 300m\n", encoding="utf-8")
+        facts_file.write_text(
+            "# header comment\nDesigned by Gustave Eiffel\nOriginal height 300m\n", encoding="utf-8"
+        )
 
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "Tell me about the Eiffel Tower",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
-                "--expected-facts-file", str(facts_file),
+                "--expected-facts-file",
+                str(facts_file),
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -257,18 +284,19 @@ class TestCheckHallucination:
         # Comment NOT propagated.
         assert "header comment" not in judge_call["prompt"]
 
-    def test_footer_shows_facts_count(
-        self, hallu_provider: _HallucinationFake
-    ) -> None:
+    def test_footer_shows_facts_count(self, hallu_provider: _HallucinationFake) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
-                "--expected-facts", "a,b,c",
+                "--expected-facts",
+                "a,b,c",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -281,9 +309,7 @@ class TestCheckHallucination:
 
 
 class TestPanelAggregation:
-    def test_panel_aggregates_worst_wins(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_panel_aggregates_worst_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Three judges: Low, Medium, High - panel must show High."""
         # Custom fake that returns different risk levels per judge model.
         responses = {
@@ -303,8 +329,12 @@ class TestPanelAggregation:
                 raise NotImplementedError
 
             async def complete(
-                self, prompt: str, model: str, temperature: float,
-                system_prompt: str | None = None, *,
+                self,
+                prompt: str,
+                model: str,
+                temperature: float,
+                system_prompt: str | None = None,
+                *,
                 on_chunk: OnChunk | None = None,
             ) -> CompletionResult:
                 self.calls.append({"prompt": prompt, "model": model})
@@ -313,9 +343,15 @@ class TestPanelAggregation:
                 if on_chunk is not None:
                     on_chunk(output)
                 return CompletionResult(
-                    output=output, input_tokens=10, output_tokens=5,
-                    cost_usd=0.0001, latency_ms=50.0, ttft_ms=10.0,
-                    model=model, provider="fake", temperature=temperature,
+                    output=output,
+                    input_tokens=10,
+                    output_tokens=5,
+                    cost_usd=0.0001,
+                    latency_ms=50.0,
+                    ttft_ms=10.0,
+                    model=model,
+                    provider="fake",
+                    temperature=temperature,
                 )
 
         fake = _PanelFake()
@@ -336,8 +372,10 @@ class TestPanelAggregation:
             cli_main,
             [
                 "test",
-                "--models", "gpt-5.5",
-                "--judges", "claude-opus-4-7,gemini-3.1-pro,grok-4.3",
+                "--models",
+                "gpt-5.5",
+                "--judges",
+                "claude-opus-4-7,gemini-3.1-pro,grok-4.3",
                 "--check-hallucination",
                 "--no-stream",
                 "--no-judge-tos",
@@ -360,8 +398,11 @@ class TestToSDisclosure:
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "test",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
                 "--no-stream",
             ],
@@ -372,15 +413,16 @@ class TestToSDisclosure:
         # Extended hallucination notice is appended.
         assert "guidance, not ground truth" in result.output
 
-    def test_no_judge_tos_suppresses_both(
-        self, hallu_provider: _HallucinationFake
-    ) -> None:
+    def test_no_judge_tos_suppresses_both(self, hallu_provider: _HallucinationFake) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "test",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
                 "--no-stream",
                 "--no-judge-tos",
@@ -406,11 +448,15 @@ class TestBatchHallucinationOutput:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
-                "--output", str(out),
+                "--output",
+                str(out),
                 "--no-judge-tos",
             ],
         )
@@ -432,11 +478,15 @@ class TestBatchHallucinationOutput:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--check-hallucination",
-                "--output", str(out),
+                "--output",
+                str(out),
                 "--no-judge-tos",
             ],
         )
