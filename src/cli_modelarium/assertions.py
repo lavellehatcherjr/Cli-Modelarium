@@ -1,15 +1,15 @@
 """Deterministic assertions for batch evaluation.
 
-Nine assertion types implement mechanical pass/fail checks over LLM outputs.
+Ten assertion types implement mechanical pass/fail checks over LLM outputs.
 The whole point is that "deterministic" means: given the same output, the
 result is always the same - no LLM judge in the loop, no fuzziness. Useful
 for prompt regression tests in CI/CD.
 
 The dispatcher is data-driven: a `dict[str, callable]` maps each type to
-its check function. Adding a tenth type means adding one entry plus one
+its check function. Adding a new type means adding one entry plus one
 function.
 
-`jsonschema` is an OPTIONAL dependency. Eight of nine assertion types work
+`jsonschema` is an OPTIONAL dependency. Nine of ten assertion types work
 without it; only `json_schema` needs it. The import happens inside the
 check function so:
     a) tests can simulate a missing install with monkeypatch
@@ -21,13 +21,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from cli_modelarium.exceptions import AssertionConfigError
 
 
-class AssertionType(str, Enum):
+class AssertionType(StrEnum):
     """Supported assertion types. `str` subclass so values JSON-serialize natively."""
 
     CONTAINS = "contains"
