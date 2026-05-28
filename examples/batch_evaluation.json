@@ -1,0 +1,36 @@
+[
+  {
+    "id": "factual",
+    "prompt": "What is the capital of Japan?",
+    "assertions": [
+      {"type": "contains", "value": "Tokyo"},
+      {"type": "max_length_chars", "value": 200}
+    ]
+  },
+  {
+    "id": "json_output",
+    "prompt": "List 3 primary colors as a JSON array. Respond with ONLY the JSON, no markdown.",
+    "system": "You are a JSON-only response generator.",
+    "assertions": [
+      {"type": "json_valid"},
+      {"type": "regex", "value": "(red|blue|yellow)"}
+    ]
+  },
+  {
+    "id": "schema_check",
+    "prompt": "Return a person object with name and age fields as JSON.",
+    "assertions": [
+      {
+        "type": "json_schema",
+        "value": {
+          "type": "object",
+          "required": ["name", "age"],
+          "properties": {
+            "name": {"type": "string"},
+            "age": {"type": "integer"}
+          }
+        }
+      }
+    ]
+  }
+]
