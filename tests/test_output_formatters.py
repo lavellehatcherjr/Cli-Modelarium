@@ -1,4 +1,5 @@
 """Tests for cli_modelarium.output_formatters - CSV, JSON, Markdown writers."""
+
 from __future__ import annotations
 
 import csv
@@ -100,9 +101,7 @@ class TestCsvFormat:
 
     def test_newlines_in_output_escaped_to_literal(self) -> None:
         """A multi-line response must NOT break the CSV row."""
-        text = _format_csv(
-            [_make_result(output="line1\nline2\nline3")]
-        )
+        text = _format_csv([_make_result(output="line1\nline2\nline3")])
         rows = list(csv.DictReader(io.StringIO(text)))
         # Exactly one row, no premature line break.
         assert len(rows) == 1
@@ -116,9 +115,7 @@ class TestCsvFormat:
         assert "\\n" in rows[0]["output"]
 
     def test_none_latency_renders_as_empty_string(self) -> None:
-        text = _format_csv(
-            [_make_result(latency_ms=None, ttft_ms=None, error="failed")]
-        )
+        text = _format_csv([_make_result(latency_ms=None, ttft_ms=None, error="failed")])
         rows = list(csv.DictReader(io.StringIO(text)))
         # CSV doesn't have a real NULL - empty string is the convention.
         assert rows[0]["latency_ms"] == ""
@@ -137,9 +134,7 @@ class TestCsvFormat:
         text = raw.decode("utf-8")
         assert "中文" in text
 
-    def test_write_csv_uses_newline_empty_no_extra_blank_rows(
-        self, tmp_path: Path
-    ) -> None:
+    def test_write_csv_uses_newline_empty_no_extra_blank_rows(self, tmp_path: Path) -> None:
         """Without newline='', csv would write \\r\\n+\\n on Windows -> blank rows.
         We check by parsing the file back: row count must match input count.
         """
@@ -188,9 +183,7 @@ class TestJsonFormat:
         assert parsed["total_results"] == 2
 
     def test_results_array_round_trips_unicode(self) -> None:
-        text = _format_json(
-            [_make_result(prompt="hello with utf-8: é 中文")]
-        )
+        text = _format_json([_make_result(prompt="hello with utf-8: é 中文")])
         # ensure_ascii=False keeps unicode as-is (not \uXXXX).
         assert "中文" in text
         parsed = json.loads(text)
@@ -254,9 +247,7 @@ class TestMarkdownFormat:
         # The per-row table cell for cost must read "Free", not "$0.000000".
         # (The aggregate "Total cost" line in the header IS allowed to be
         # $0.000000 - that's the sum across all rows.)
-        row_lines = [
-            line for line in text.splitlines() if "local/llama-3.3" in line
-        ]
+        row_lines = [line for line in text.splitlines() if "local/llama-3.3" in line]
         assert row_lines, "local model row should appear in markdown"
         assert any("Free" in line for line in row_lines)
         # Crucially, the row itself doesn't carry $0.000000 - "Free" wins there.
@@ -284,11 +275,11 @@ class TestMarkdownFormat:
 
     def test_pipe_in_prompt_escaped(self) -> None:
         """A `|` in the prompt mustn't break the Markdown table cell."""
-        text = _format_markdown(
-            [_make_result(prompt="hello | world")]
-        )
+        text = _format_markdown([_make_result(prompt="hello | world")])
         # The literal pipe inside the cell needs escaping.
-        assert "hello \\| world" in text or "hello | world" in text  # either acceptable; pipe-in-prompt is in the H2 row, not the model table
+        assert (
+            "hello \\| world" in text or "hello | world" in text
+        )  # either acceptable; pipe-in-prompt is in the H2 row, not the model table
 
     def test_newlines_in_prompt_collapsed(self) -> None:
         text = _format_markdown([_make_result(prompt="line one\nline two")])
