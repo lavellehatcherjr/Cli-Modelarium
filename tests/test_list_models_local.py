@@ -8,9 +8,9 @@ Two layers:
        --local-url propagation and the friendly error panels for the various
        failure modes (connect, timeout, HTTP error, empty).
 """
+
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import httpx
@@ -19,7 +19,6 @@ from click.testing import CliRunner
 
 from cli_modelarium.cli import main as cli_main
 from cli_modelarium.providers.local_provider import LocalProvider
-
 
 # ===== fake httpx client =====
 
@@ -37,7 +36,9 @@ class _FakeResponse:
         if self.status_code >= 400:
             request = httpx.Request("GET", "http://localhost:11434/v1/models")
             raise httpx.HTTPStatusError(
-                f"{self.status_code}", request=request, response=httpx.Response(self.status_code, request=request)
+                f"{self.status_code}",
+                request=request,
+                response=httpx.Response(self.status_code, request=request),
             )
 
     def json(self) -> Any:
@@ -59,7 +60,7 @@ def _install_fake_client(
         def __init__(self, **kwargs: Any) -> None:
             captured["timeout"] = kwargs.get("timeout")
 
-        async def __aenter__(self) -> "_FakeAsyncClient":
+        async def __aenter__(self) -> _FakeAsyncClient:
             return self
 
         async def __aexit__(self, *args: Any) -> bool:
@@ -88,8 +89,18 @@ class TestDiscoverModels:
             json_data={
                 "object": "list",
                 "data": [
-                    {"id": "llama3.3:latest", "object": "model", "created": 1700000000, "owned_by": "ollama"},
-                    {"id": "qwen2.5:32b", "object": "model", "created": 1700001000, "owned_by": "ollama"},
+                    {
+                        "id": "llama3.3:latest",
+                        "object": "model",
+                        "created": 1700000000,
+                        "owned_by": "ollama",
+                    },
+                    {
+                        "id": "qwen2.5:32b",
+                        "object": "model",
+                        "created": 1700001000,
+                        "owned_by": "ollama",
+                    },
                 ],
             }
         )
@@ -136,9 +147,7 @@ class TestDiscoverModels:
 
         assert captured["timeout"] == LocalProvider.DISCOVERY_TIMEOUT_SECONDS
 
-    async def test_empty_response_returns_empty_list(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_empty_response_returns_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
         response = _FakeResponse(json_data={"data": []})
         _install_fake_client(monkeypatch, response=response)
 
@@ -202,9 +211,7 @@ class TestListModelsLocalCli:
         assert "local/qwen2.5:32b" in output
         assert "Free" in output
 
-    def test_connect_error_renders_friendly_panel(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_connect_error_renders_friendly_panel(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Connection refused must NOT fail the command - shows a panel instead."""
         _install_fake_client(monkeypatch, exception=httpx.ConnectError("refused"))
 
