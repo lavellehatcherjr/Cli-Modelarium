@@ -21,6 +21,11 @@ keywords = [
     "openai",
     "anthropic",
     "ollama",
+    "bootstrap",
+    "confidence-intervals",
+    "statistical-significance",
+    "mcnemar",
+    "paired-tests",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -38,7 +43,7 @@ classifiers = [
 ]
 dependencies = [
     "openai~=2.38",
-    "anthropic~=0.104",
+    "anthropic>=0.104,<0.200",
     "google-genai~=2.6",
     "mistralai~=2.4.7",
     "httpx~=0.28",
