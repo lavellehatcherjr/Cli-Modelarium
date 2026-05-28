@@ -1,4 +1,5 @@
 """Tests for cli_modelarium.batch - parsers, validation, size limits."""
+
 from __future__ import annotations
 
 import json
@@ -22,7 +23,6 @@ from cli_modelarium.exceptions import (
     BatchSizeError,
     BatchValidationError,
 )
-
 
 # ===== .txt parser =====
 
@@ -432,7 +432,9 @@ class TestBuildBatchStates:
             BatchPrompt(id="p2", prompt="b"),
         ]
         pairs = build_batch_states(
-            prompts, models=["gpt-5.5"], temperatures=[0.0, 1.0],
+            prompts,
+            models=["gpt-5.5"],
+            temperatures=[0.0, 1.0],
             command_system_prompts=[None],
         )
         # 2 prompts x 1 model x 2 temps = 4 states
@@ -444,12 +446,13 @@ class TestBuildBatchStates:
             BatchPrompt(id="b", prompt="b"),
         ]
         pairs = build_batch_states(
-            prompts, models=["gpt-5.5"], temperatures=[0.0],
+            prompts,
+            models=["gpt-5.5"],
+            temperatures=[0.0],
             command_system_prompts=["cmd-sp-1", "cmd-sp-2"],
         )
         # Prompt a: 1 SP (own) -> 1 state. Prompt b: 2 SPs (cmd) -> 2 states.
         assert len(pairs) == 3
-        states_by_id = {bp.id: [s for s, bp_ in pairs if bp_.id == bp.id] for _, bp in pairs}
         a_states = [s for s, bp in pairs if bp.id == "a"]
         b_states = [s for s, bp in pairs if bp.id == "b"]
         assert len(a_states) == 1
