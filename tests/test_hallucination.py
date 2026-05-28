@@ -7,6 +7,7 @@ Covers:
     * aggregate_risk_levels and annotate_risk_levels (worst-wins aggregation)
     * resolve_hallucination_config (flag combination validation)
 """
+
 from __future__ import annotations
 
 import json
@@ -14,15 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from cli_modelarium.exceptions import BatchValidationError, ModelariumError
+from cli_modelarium.exceptions import BatchValidationError
 from cli_modelarium.hallucination import (
     EXPECTED_FACTS_MAX_BYTES,
-    HALLUCINATION_CRITERIA_BASE,
     HALLUCINATION_TEMPLATE,
     HALLUCINATION_TOS_EXTENSION,
-    HALLUCINATION_WITH_FACTS,
-    HALLUCINATION_WITHOUT_FACTS,
-    HallucinationConfig,
     aggregate_risk_levels,
     annotate_risk_levels,
     build_hallucination_criteria,
@@ -33,7 +30,6 @@ from cli_modelarium.hallucination import (
     risk_level_from_score,
 )
 from cli_modelarium.judging import JudgeResult, JudgeScore
-
 
 # ===== parse_facts_csv =====
 
@@ -211,12 +207,9 @@ class TestParseHallucinationResponse:
         assert result["parse_error"] is None
 
     def test_risk_level_derived_for_each_band(self) -> None:
-        cases = [(10, "Low"), (7, "Low"), (6, "Medium"), (4, "Medium"),
-                 (3, "High"), (1, "High")]
+        cases = [(10, "Low"), (7, "Low"), (6, "Medium"), (4, "Medium"), (3, "High"), (1, "High")]
         for score, expected in cases:
-            result = parse_hallucination_response(
-                f'{{"score": {score}, "reasoning": "x"}}'
-            )
+            result = parse_hallucination_response(f'{{"score": {score}, "reasoning": "x"}}')
             assert result["risk_level"] == expected, f"score={score}"
 
     def test_invalid_risk_level_value_sets_parse_error(self) -> None:
@@ -229,9 +222,7 @@ class TestParseHallucinationResponse:
         assert result["risk_level"] is None
 
     def test_risk_level_wrong_type_sets_parse_error(self) -> None:
-        result = parse_hallucination_response(
-            '{"score": 5, "risk_level": 99, "reasoning": "x"}'
-        )
+        result = parse_hallucination_response('{"score": 5, "risk_level": 99, "reasoning": "x"}')
         assert result["parse_error"] is not None
         assert result["risk_level"] is None
 
@@ -268,9 +259,15 @@ class TestRiskLevelFromScore:
     @pytest.mark.parametrize(
         "score, expected",
         [
-            (10, "Low"), (8, "Low"), (7, "Low"),
-            (6, "Medium"), (5, "Medium"), (4, "Medium"),
-            (3, "High"), (2, "High"), (1, "High"),
+            (10, "Low"),
+            (8, "Low"),
+            (7, "Low"),
+            (6, "Medium"),
+            (5, "Medium"),
+            (4, "Medium"),
+            (3, "High"),
+            (2, "High"),
+            (1, "High"),
         ],
     )
     def test_score_to_level(self, score: int, expected: str) -> None:
@@ -291,7 +288,11 @@ class TestRiskLevelFromScore:
 class TestAggregateRiskLevels:
     def _judge(self, risk_level: str | None) -> JudgeScore:
         return JudgeScore(
-            model="m", score=5, reasoning="", cost_usd=0.0, latency_ms=0.0,
+            model="m",
+            score=5,
+            reasoning="",
+            cost_usd=0.0,
+            latency_ms=0.0,
             risk_level=risk_level,
         )
 
@@ -321,10 +322,21 @@ class TestAggregateRiskLevels:
 
 class TestAnnotateRiskLevels:
     def test_mutates_in_place(self) -> None:
-        jr = JudgeResult(judges=[
-            JudgeScore(model="a", score=2, reasoning="", cost_usd=0.0, latency_ms=0.0, risk_level="High"),
-            JudgeScore(model="b", score=8, reasoning="", cost_usd=0.0, latency_ms=0.0, risk_level="Low"),
-        ])
+        jr = JudgeResult(
+            judges=[
+                JudgeScore(
+                    model="a",
+                    score=2,
+                    reasoning="",
+                    cost_usd=0.0,
+                    latency_ms=0.0,
+                    risk_level="High",
+                ),
+                JudgeScore(
+                    model="b", score=8, reasoning="", cost_usd=0.0, latency_ms=0.0, risk_level="Low"
+                ),
+            ]
+        )
         results = [jr]
         annotate_risk_levels(results)
         assert results[0].aggregated_risk_level == "High"
