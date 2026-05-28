@@ -6,6 +6,7 @@ attribute and the final chunk(s) carry `.usage_metadata` with Google-specific
 field names (`prompt_token_count`, `candidates_token_count`,
 `cached_content_token_count`).
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -22,7 +23,6 @@ from cli_modelarium.exceptions import (
 )
 from cli_modelarium.providers.google_provider import GoogleProvider
 
-
 # ===== fake plumbing =====
 
 
@@ -36,7 +36,7 @@ class _FakeAsyncIterator:
     def __init__(self, chunks: list[_FakeChunk]) -> None:
         self._chunks = chunks
 
-    def __aiter__(self) -> "_FakeAsyncIterator":
+    def __aiter__(self) -> _FakeAsyncIterator:
         self._iter = iter(self._chunks)
         return self
 
@@ -148,9 +148,7 @@ async def test_system_prompt_in_config(monkeypatch: pytest.MonkeyPatch) -> None:
     chunks = _build_chunks(["ok"], input_tokens=1, output_tokens=1)
     provider, models = _make_provider(monkeypatch, chunks=chunks)
 
-    await provider.complete(
-        "user prompt", "gemini-3.1-pro", 0.0, system_prompt="you are helpful"
-    )
+    await provider.complete("user prompt", "gemini-3.1-pro", 0.0, system_prompt="you are helpful")
 
     config = models.last_kwargs["config"]
     assert config["system_instruction"] == "you are helpful"
