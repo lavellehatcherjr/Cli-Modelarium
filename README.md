@@ -327,6 +327,23 @@ cli-modelarium "Summarize the key features of microservices architecture" \
 
 The command exits with code 1 if pass rate drops below 90%, failing the build.
 
+### More examples
+
+The [`examples/`](examples/) folder contains focused demo scripts for
+every major feature:
+
+- `basic_comparison.sh` - simple multi-model comparison
+- `reproducibility_analysis.sh` - variance analysis with `--runs`
+- `statistical_significance.sh` - significance tests with correction
+- `publication_grade_eval.sh` - bootstrap CIs + paired tests with
+  reproducible seeds
+- `mcnemar_hallucination.sh` - McNemar's test for hallucination rates
+- `batch_evaluation.json` - multi-prompt batch with assertions
+- `ci_eval_suite.json` + `github_actions_workflow.yml` - CI/CD
+  integration template
+
+See [`examples/README.md`](examples/README.md) for the full list.
+
 ## Configuration
 
 ### API keys
