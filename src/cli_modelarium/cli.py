@@ -15,13 +15,13 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from cli_modelarium import __version__
-from cli_modelarium.banner import render_banner, should_show_banner
 from cli_modelarium.assertions import (
     AssertionResult,
     count_failed,
     count_passed,
     run_assertions,
 )
+from cli_modelarium.banner import render_banner, should_show_banner
 from cli_modelarium.batch import (
     ESTIMATE_INPUT_TOKENS,
     ESTIMATE_OUTPUT_TOKENS,
@@ -1750,9 +1750,9 @@ def _list_local_models(local_url: str | None) -> None:
 def _format_unix_timestamp(ts: object) -> str:
     """Format a unix timestamp (int or float) as YYYY-MM-DD, or '-' if unparseable."""
     try:
-        from datetime import datetime, timezone
+        from datetime import UTC, datetime
 
-        return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%d")
+        return datetime.fromtimestamp(float(ts), tz=UTC).strftime("%Y-%m-%d")
     except (TypeError, ValueError, OSError):
         return "-"
 
@@ -2160,7 +2160,8 @@ def _display_results_with_runs(
     show_hallucination_rate = hallucination_mode and judge_results is not None
     show_judge_column = judge_results is not None and not show_hallucination_rate
 
-    title = f"Comparing {len(groups)} configuration{'s' if len(groups) != 1 else ''}, {runs} runs each"
+    plural = "s" if len(groups) != 1 else ""
+    title = f"Comparing {len(groups)} configuration{plural}, {runs} runs each"
     table = Table(title=title, border_style="dim", title_justify="left")
     table.add_column("Model", style="bold")
     if show_sp_column:
@@ -2208,7 +2209,8 @@ def _display_results_with_runs(
                 color = (
                     "red" if rate >= 0.5 else "yellow" if rate >= 0.2 else "green"
                 )
-                hallucination_rate_text = f"[{color}]{high_count}/{judged} ({rate * 100:.0f}%)[/{color}]"
+                pct = f"{rate * 100:.0f}%"
+                hallucination_rate_text = f"[{color}]{high_count}/{judged} ({pct})[/{color}]"
 
         # Judge score (mode-only judging): pull the first non-empty JudgeResult.
         score_text = "[dim]-[/dim]"
