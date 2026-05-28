@@ -5,6 +5,7 @@ Three layers:
     2. score_with_judge - one judge call with mocked provider
     3. run_judging - orchestration: self-eval-skip, panel aggregation, cost
 """
+
 from __future__ import annotations
 
 import math
@@ -16,7 +17,6 @@ import pytest
 from cli_modelarium.exceptions import ProviderError
 from cli_modelarium.judging import (
     DEFAULT_CRITERIA,
-    JUDGE_PROMPT_TEMPLATE,
     JudgeScore,
     _aggregate,
     _coerce_score,
@@ -31,7 +31,6 @@ from cli_modelarium.judging import (
 )
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
 from cli_modelarium.streaming import StreamState
-
 
 # ===== parse_judge_response =====
 
@@ -54,9 +53,7 @@ class TestParseJudgeResponse:
         assert result["score"] == 9
 
     def test_leading_text_before_json(self) -> None:
-        text = (
-            'Here is my evaluation:\n{"score": 6, "reasoning": "passable"}'
-        )
+        text = 'Here is my evaluation:\n{"score": 6, "reasoning": "passable"}'
         result = parse_judge_response(text)
         assert result["score"] == 6
         assert result["reasoning"] == "passable"
@@ -185,9 +182,7 @@ class TestBuildJudgePrompt:
         assert "4" in prompt
 
     def test_empty_criteria_uses_defaults(self) -> None:
-        prompt = build_judge_prompt(
-            original_prompt="x", response_to_eval="y", criteria=[]
-        )
+        prompt = build_judge_prompt(original_prompt="x", response_to_eval="y", criteria=[])
         for c in DEFAULT_CRITERIA:
             assert f"- {c}" in prompt
 
@@ -262,9 +257,7 @@ class _FakeJudgeProvider(BaseProvider):
         *,
         on_chunk: OnChunk | None = None,
     ) -> CompletionResult:
-        self.calls.append(
-            {"prompt": prompt, "model": model, "temperature": temperature}
-        )
+        self.calls.append({"prompt": prompt, "model": model, "temperature": temperature})
         if self._error is not None:
             raise self._error
         return CompletionResult(
@@ -340,7 +333,9 @@ class TestScoreWithJudge:
 # ===== run_judging =====
 
 
-def _state(model: str, temperature: float = 0.0, text: str = "answer", error: str | None = None) -> StreamState:
+def _state(
+    model: str, temperature: float = 0.0, text: str = "answer", error: str | None = None
+) -> StreamState:
     return StreamState(
         model=model,
         provider_name="openai",
@@ -490,7 +485,9 @@ class TestAggregate:
     def test_average_excludes_failed_judges(self) -> None:
         judges = [
             JudgeScore(model="a", score=8, reasoning="", cost_usd=0.0, latency_ms=0.0),
-            JudgeScore(model="b", score=None, reasoning="", cost_usd=0.0, latency_ms=0.0, parse_error="bad"),
+            JudgeScore(
+                model="b", score=None, reasoning="", cost_usd=0.0, latency_ms=0.0, parse_error="bad"
+            ),
             JudgeScore(model="c", score=6, reasoning="", cost_usd=0.0, latency_ms=0.0),
         ]
         result = _aggregate(judges)
@@ -513,8 +510,12 @@ class TestAggregate:
 
     def test_all_failed_judges_yields_none_average(self) -> None:
         judges = [
-            JudgeScore(model="a", score=None, reasoning="", cost_usd=0.0, latency_ms=0.0, parse_error="x"),
-            JudgeScore(model="b", score=None, reasoning="", cost_usd=0.0, latency_ms=0.0, parse_error="y"),
+            JudgeScore(
+                model="a", score=None, reasoning="", cost_usd=0.0, latency_ms=0.0, parse_error="x"
+            ),
+            JudgeScore(
+                model="b", score=None, reasoning="", cost_usd=0.0, latency_ms=0.0, parse_error="y"
+            ),
         ]
         result = _aggregate(judges)
         assert result.average_score is None
@@ -533,13 +534,17 @@ class TestCostTotals:
         from cli_modelarium.judging import JudgeResult
 
         results = [
-            JudgeResult(judges=[
-                JudgeScore(model="a", score=8, reasoning="", cost_usd=0.001, latency_ms=0.0),
-                JudgeScore(model="b", score=7, reasoning="", cost_usd=0.002, latency_ms=0.0),
-            ]),
-            JudgeResult(judges=[
-                JudgeScore(model="a", score=9, reasoning="", cost_usd=0.0005, latency_ms=0.0),
-            ]),
+            JudgeResult(
+                judges=[
+                    JudgeScore(model="a", score=8, reasoning="", cost_usd=0.001, latency_ms=0.0),
+                    JudgeScore(model="b", score=7, reasoning="", cost_usd=0.002, latency_ms=0.0),
+                ]
+            ),
+            JudgeResult(
+                judges=[
+                    JudgeScore(model="a", score=9, reasoning="", cost_usd=0.0005, latency_ms=0.0),
+                ]
+            ),
         ]
         assert total_judge_cost(results) == pytest.approx(0.0035)
         assert total_judge_calls(results) == 3
