@@ -8,6 +8,7 @@ Covers the four orchestrator behaviors that Phase 4 added:
     * 529 ProviderOverloadedError triggers retry with a longer base backoff
     * One slow stream does not block other streams making progress
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,11 +26,10 @@ from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChun
 from cli_modelarium.streaming import (
     OVERLOADED_BASE_DELAY_SECONDS,
     RATE_LIMIT_BASE_DELAY_SECONDS,
-    StreamState,
     StreamingDisplay,
+    StreamState,
     run_streaming_comparison,
 )
-
 
 # ===== generic fake provider =====
 
@@ -164,8 +164,11 @@ def fake_sleep() -> Any:
 
 async def test_ttft_recorded_for_each_state() -> None:
     provider = _ChunkingProvider(
-        "openai", chunks=["hi", " there"], first_chunk_delay=0.01,
-        input_tokens=1, output_tokens=2,
+        "openai",
+        chunks=["hi", " there"],
+        first_chunk_delay=0.01,
+        input_tokens=1,
+        output_tokens=2,
     )
 
     states = await run_streaming_comparison(
@@ -177,10 +180,14 @@ async def test_ttft_recorded_for_each_state() -> None:
         live_display=False,
     )
 
+    # TTFT must be captured on the first chunk and be non-negative. We do NOT
+    # assert a minimum magnitude: on Windows, asyncio sleep granularity and OS
+    # timer coalescing can make a 10ms artificial delay measure as ~0ms, so a
+    # magnitude floor is platform-fragile. The "captured on first chunk"
+    # contract is covered here (is not None) and by
+    # test_ttft_set_on_first_chunk_via_state_callback.
     assert states[0].ttft_ms is not None
     assert states[0].ttft_ms >= 0
-    # TTFT should be at least the artificial first-chunk delay (10ms).
-    assert states[0].ttft_ms >= 5  # allow scheduling jitter
 
 
 async def test_ttft_set_on_first_chunk_via_state_callback() -> None:
@@ -205,8 +212,11 @@ async def test_ttft_set_on_first_chunk_via_state_callback() -> None:
 async def test_semaphore_caps_concurrent_calls_per_provider() -> None:
     """concurrency=2 means at most 2 in-flight calls per provider at any time."""
     provider = _ChunkingProvider(
-        "openai", chunks=["x"], first_chunk_delay=0.02,
-        input_tokens=1, output_tokens=1,
+        "openai",
+        chunks=["x"],
+        first_chunk_delay=0.02,
+        input_tokens=1,
+        output_tokens=1,
     )
 
     await run_streaming_comparison(
@@ -231,7 +241,8 @@ async def test_semaphores_are_per_provider_not_global() -> None:
         "anthropic", chunks=["a"], first_chunk_delay=0.02, input_tokens=1, output_tokens=1
     )
 
-    factory = lambda name: openai_p if name == "openai" else anthropic_p
+    def factory(name: str) -> BaseProvider:
+        return openai_p if name == "openai" else anthropic_p
 
     await run_streaming_comparison(
         prompt="p",
@@ -254,17 +265,25 @@ async def test_semaphores_are_per_provider_not_global() -> None:
 async def test_slow_stream_does_not_block_fast_one() -> None:
     """A slow provider must not prevent a fast provider from completing first."""
     fast = _ChunkingProvider(
-        "openai", chunks=["fast"], first_chunk_delay=0.01,
-        input_tokens=1, output_tokens=1,
+        "openai",
+        chunks=["fast"],
+        first_chunk_delay=0.01,
+        input_tokens=1,
+        output_tokens=1,
     )
     slow = _ChunkingProvider(
-        "anthropic", chunks=["slow"], first_chunk_delay=0.10,
-        input_tokens=1, output_tokens=1,
+        "anthropic",
+        chunks=["slow"],
+        first_chunk_delay=0.10,
+        input_tokens=1,
+        output_tokens=1,
     )
 
-    factory = lambda name: fast if name == "openai" else slow
+    def factory(name: str) -> BaseProvider:
+        return fast if name == "openai" else slow
 
     import time
+
     start = time.monotonic()
     states = await run_streaming_comparison(
         prompt="p",
@@ -368,9 +387,7 @@ async def test_rate_limit_gives_up_after_max_retries(fake_sleep: Any) -> None:
     success = CompletionResult(output="never", provider="openai")
     provider = _FailingProvider(
         "openai",
-        errors=[
-            RateLimitError("limit", provider="openai") for _ in range(10)
-        ],
+        errors=[RateLimitError("limit", provider="openai") for _ in range(10)],
         success_result=success,
     )
 
@@ -476,11 +493,29 @@ async def test_non_retryable_error_propagates_immediately(fake_sleep: Any) -> No
 
 def test_streaming_display_renders_panels() -> None:
     states = [
-        StreamState(model="gpt-5.5", provider_name="openai", temperature=0.0, status="streaming", text="hi"),
-        StreamState(model="claude-opus-4-7", provider_name="anthropic", temperature=0.0, status="complete", text="done"),
-        StreamState(model="grok-4.3", provider_name="xai", temperature=0.0, status="error", error="boom"),
-        StreamState(model="gemini-3.1-pro", provider_name="google", temperature=0.0, status="retrying", retry_message="rate limited"),
-        StreamState(model="mistral-large-latest", provider_name="mistral", temperature=0.0, status="pending"),
+        StreamState(
+            model="gpt-5.5", provider_name="openai", temperature=0.0, status="streaming", text="hi"
+        ),
+        StreamState(
+            model="claude-opus-4-7",
+            provider_name="anthropic",
+            temperature=0.0,
+            status="complete",
+            text="done",
+        ),
+        StreamState(
+            model="grok-4.3", provider_name="xai", temperature=0.0, status="error", error="boom"
+        ),
+        StreamState(
+            model="gemini-3.1-pro",
+            provider_name="google",
+            temperature=0.0,
+            status="retrying",
+            retry_message="rate limited",
+        ),
+        StreamState(
+            model="mistral-large-latest", provider_name="mistral", temperature=0.0, status="pending"
+        ),
     ]
     display = StreamingDisplay(states)
 
