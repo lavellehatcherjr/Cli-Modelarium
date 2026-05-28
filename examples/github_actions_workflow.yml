@@ -1,0 +1,41 @@
+# Example GitHub Actions workflow for prompt regression testing.
+# Save this in your project's .github/workflows/ directory.
+# Requires API keys configured as repository secrets.
+
+name: Prompt Regression Tests
+
+on:
+  pull_request:
+    paths:
+      - 'prompts/**'
+      - 'eval_suite.json'
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cli-modelarium
+        run: pip install cli-modelarium
+
+      - name: Run evaluation suite
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          cli-modelarium batch eval_suite.json \
+            --models gpt-5.5,claude-opus-4-7 \
+            --output results.json \
+            --min-pass-rate 0.9
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: results.json
