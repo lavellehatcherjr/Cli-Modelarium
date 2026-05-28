@@ -7,6 +7,7 @@ the result does NOT count as a failure for exit-code purposes.
 The trick to testing this is patching the import inside the check function
 so the `try: import jsonschema` line raises ImportError.
 """
+
 from __future__ import annotations
 
 import builtins
@@ -40,22 +41,27 @@ class TestJsonschemaOptional:
     def test_jsonschema_present_assertions_run_normally(self) -> None:
         """Sanity baseline: with jsonschema installed (real env), schema validation works."""
         results = run_assertions(
-            '{"x": 1}', None, 0.0,
-            [{"type": "json_schema",
-              "value": {"type": "object", "properties": {"x": {"type": "integer"}}}}],
+            '{"x": 1}',
+            None,
+            0.0,
+            [
+                {
+                    "type": "json_schema",
+                    "value": {"type": "object", "properties": {"x": {"type": "integer"}}},
+                }
+            ],
         )
         assert results[0].passed
         assert results[0].error is None
 
-    def test_jsonschema_missing_sets_error_field(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_jsonschema_missing_sets_error_field(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_missing(monkeypatch, "jsonschema")
 
         results = run_assertions(
-            '{"x": 1}', None, 0.0,
-            [{"type": "json_schema",
-              "value": {"type": "object"}}],
+            '{"x": 1}',
+            None,
+            0.0,
+            [{"type": "json_schema", "value": {"type": "object"}}],
         )
 
         # Single assertion result.
@@ -75,7 +81,9 @@ class TestJsonschemaOptional:
         _patch_missing(monkeypatch, "jsonschema")
 
         results = run_assertions(
-            "Paris is the capital", None, 0.0,
+            "Paris is the capital",
+            None,
+            0.0,
             [
                 {"type": "contains", "value": "Paris"},
                 {"type": "json_schema", "value": {"type": "object"}},
@@ -99,7 +107,9 @@ class TestJsonschemaOptional:
         _patch_missing(monkeypatch, "jsonschema")
 
         results = run_assertions(
-            '{"x": 1}', None, 0.0,
+            '{"x": 1}',
+            None,
+            0.0,
             [
                 {"type": "contains", "value": "x"},
                 {"type": "json_schema", "value": {"type": "object"}},
