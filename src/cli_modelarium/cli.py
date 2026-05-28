@@ -15,6 +15,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from cli_modelarium import __version__
+from cli_modelarium.banner import render_banner, should_show_banner
 from cli_modelarium.assertions import (
     AssertionResult,
     count_failed,
@@ -147,6 +148,8 @@ class _DefaultCommandGroup(click.Group):
 def main(ctx: click.Context) -> None:
     """Cli Modelarium - compare LLM outputs side-by-side from your terminal."""
     if ctx.invoked_subcommand is None:
+        if should_show_banner():
+            render_banner()
         click.echo(ctx.get_help())
 
 
