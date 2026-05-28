@@ -9,6 +9,7 @@ Three things are unique to LocalProvider compared to its OpenAIProvider parent:
 Plus the inheritance contract: stream/complete are NOT overridden, so all
 streaming and error-handling behaviour comes from OpenAIProvider for free.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -19,7 +20,6 @@ from cli_modelarium.exceptions import LocalURLError
 from cli_modelarium.pricing import calculate_cost
 from cli_modelarium.providers.local_provider import LocalProvider
 from cli_modelarium.providers.openai_provider import OpenAIProvider
-
 
 # ===== URL validation =====
 
@@ -105,9 +105,10 @@ class TestTransformModel:
         class _FakeCompletions:
             async def create(self, **kwargs: Any) -> Any:
                 captured.update(kwargs)
+
                 # Return an empty async iterator to satisfy the streaming loop.
                 class _Empty:
-                    def __aiter__(self) -> "_Empty":
+                    def __aiter__(self) -> _Empty:
                         return self
 
                     async def __anext__(self) -> Any:
@@ -216,7 +217,12 @@ class TestLocalCostIsFree:
         assert calculate_cost(model, input_tokens=1_000_000, output_tokens=1_000_000) == 0.0
         assert calculate_cost(model, input_tokens=999_999_999, output_tokens=999_999_999) == 0.0
         # Even cached tokens stay free.
-        assert calculate_cost(model, input_tokens=1_000_000, output_tokens=1_000_000, cached_tokens=999_999) == 0.0
+        assert (
+            calculate_cost(
+                model, input_tokens=1_000_000, output_tokens=1_000_000, cached_tokens=999_999
+            )
+            == 0.0
+        )
 
 
 # ===== discovery (URL validation hook) =====
