@@ -4,10 +4,10 @@ Strategy: monkeypatch `_get_provider_instance` to return a smart fake that
 detects whether the prompt is a judge prompt (looks for the "JSON object"
 marker we put in JUDGE_PROMPT_TEMPLATE) and responds accordingly.
 """
+
 from __future__ import annotations
 
 import csv
-import io
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,7 +18,6 @@ from click.testing import CliRunner
 
 from cli_modelarium.cli import main as cli_main
 from cli_modelarium.providers.base import BaseProvider, CompletionResult, OnChunk
-
 
 # ===== smart fake that detects judge prompts =====
 
@@ -113,16 +112,16 @@ def dual_provider(monkeypatch: pytest.MonkeyPatch) -> _DualPurposeProvider:
 
 
 class TestJudgeFlag:
-    def test_single_judge_runs_end_to_end(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_single_judge_runs_end_to_end(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--no-stream",
                 "--no-judge-tos",  # suppress ToS panel for cleaner output
             ],
@@ -136,16 +135,16 @@ class TestJudgeFlag:
         assert len(judge_calls) == 1
         assert judge_calls[0]["temperature"] == 0.0
 
-    def test_score_appears_in_output(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_score_appears_in_output(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -156,16 +155,16 @@ class TestJudgeFlag:
         assert "Score" in result.output
         assert "8" in result.output
 
-    def test_judge_cost_displayed(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_judge_cost_displayed(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -179,16 +178,16 @@ class TestJudgeFlag:
 
 
 class TestJudgesPanel:
-    def test_three_judges_each_called_once(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_three_judges_each_called_once(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--judges", "claude-opus-4-7,gemini-3.1-pro,grok-4.3",
+                "--models",
+                "gpt-5.5",
+                "--judges",
+                "claude-opus-4-7,gemini-3.1-pro,grok-4.3",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -207,17 +206,18 @@ class TestJudgesPanel:
 
 
 class TestJudgeCriteria:
-    def test_custom_criteria_reach_judge_prompt(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_custom_criteria_reach_judge_prompt(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
-                "--judge-criteria", "Brevity,Clever wordplay",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
+                "--judge-criteria",
+                "Brevity,Clever wordplay",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -228,17 +228,18 @@ class TestJudgeCriteria:
         assert "Brevity" in judge_call["prompt"]
         assert "Clever wordplay" in judge_call["prompt"]
 
-    def test_escaped_comma_in_criteria(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_escaped_comma_in_criteria(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "p",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
-                "--judge-criteria", r"crit one,crit two\, with comma",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
+                "--judge-criteria",
+                r"crit one,crit two\, with comma",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -272,9 +273,12 @@ class TestJudgeTemplate:
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
-                "--judge-template", str(template_path),
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
+                "--judge-template",
+                str(template_path),
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -289,16 +293,16 @@ class TestJudgeTemplate:
 
 
 class TestIncludeReasoning:
-    def test_reasoning_appears_when_flag_set(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_reasoning_appears_when_flag_set(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--include-reasoning",
                 "--no-stream",
                 "--no-judge-tos",
@@ -309,16 +313,16 @@ class TestIncludeReasoning:
         # Fake judge's reasoning text is "decent".
         assert "decent" in result.output
 
-    def test_reasoning_hidden_by_default(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_reasoning_hidden_by_default(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test prompt",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -332,16 +336,16 @@ class TestIncludeReasoning:
 
 
 class TestToSPanel:
-    def test_tos_shown_by_default(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_tos_shown_by_default(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--no-stream",
             ],
         )
@@ -352,16 +356,16 @@ class TestToSPanel:
         assert "competing AI models" in result.output
         assert "ToS" in result.output
 
-    def test_tos_suppressed_with_flag(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_tos_suppressed_with_flag(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
                 "test",
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -370,9 +374,7 @@ class TestToSPanel:
         assert result.exit_code == 0
         assert "Judge scores are for evaluation only" not in result.output
 
-    def test_no_tos_when_no_judging(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_no_tos_when_no_judging(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
@@ -387,16 +389,18 @@ class TestToSPanel:
 
 
 class TestMutualExclusion:
-    def test_judge_and_judges_together_rejected(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_judge_and_judges_together_rejected(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
-                "p", "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
-                "--judges", "claude-opus-4-7,gemini-3.1-pro",
+                "p",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
+                "--judges",
+                "claude-opus-4-7,gemini-3.1-pro",
                 "--no-stream",
             ],
         )
@@ -414,10 +418,15 @@ class TestMutualExclusion:
         result = runner.invoke(
             cli_main,
             [
-                "p", "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
-                "--judge-criteria", "x,y",
-                "--judge-template", str(template),
+                "p",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
+                "--judge-criteria",
+                "x,y",
+                "--judge-template",
+                str(template),
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -437,8 +446,11 @@ class TestJudgeModelValidation:
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
-                "--judge", "totally-fake-judge-model",
+                "test",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "totally-fake-judge-model",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -459,9 +471,14 @@ class TestJudgeModelValidation:
         """
         # Ensure no env var grants implicit access for any provider.
         for env in (
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
-            "XAI_API_KEY", "DEEPSEEK_API_KEY", "MISTRAL_API_KEY",
-            "GROQ_API_KEY", "OPENROUTER_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_API_KEY",
+            "XAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "MISTRAL_API_KEY",
+            "GROQ_API_KEY",
+            "OPENROUTER_API_KEY",
         ):
             monkeypatch.delenv(env, raising=False)
 
@@ -469,8 +486,11 @@ class TestJudgeModelValidation:
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
+                "test",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -486,15 +506,16 @@ class TestJudgeModelValidation:
 
 
 class TestSelfEvaluationSkip:
-    def test_same_model_as_main_skipped(
-        self, dual_provider: _DualPurposeProvider
-    ) -> None:
+    def test_same_model_as_main_skipped(self, dual_provider: _DualPurposeProvider) -> None:
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
             [
-                "test", "--models", "gpt-5.5",
-                "--judge", "gpt-5.5",
+                "test",
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "gpt-5.5",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -522,10 +543,14 @@ class TestBatchWithJudges:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--judge", "claude-opus-4-7",
-                "--output", str(output),
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--judge",
+                "claude-opus-4-7",
+                "--output",
+                str(output),
                 "--no-judge-tos",
             ],
         )
@@ -548,10 +573,14 @@ class TestBatchWithJudges:
         result = runner.invoke(
             cli_main,
             [
-                "batch", str(prompts_file),
-                "--models", "gpt-5.5",
-                "--judges", "claude-opus-4-7,gemini-3.1-pro",
-                "--output", str(output),
+                "batch",
+                str(prompts_file),
+                "--models",
+                "gpt-5.5",
+                "--judges",
+                "claude-opus-4-7,gemini-3.1-pro",
+                "--output",
+                str(output),
                 "--no-judge-tos",
             ],
         )
@@ -566,5 +595,6 @@ class TestBatchWithJudges:
         assert "judges" in first
         assert len(first["judges"]) == 2
         assert {j["model"] for j in first["judges"]} == {
-            "claude-opus-4-7", "gemini-3.1-pro",
+            "claude-opus-4-7",
+            "gemini-3.1-pro",
         }
