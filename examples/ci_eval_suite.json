@@ -1,0 +1,28 @@
+[
+  {
+    "id": "no_refusals",
+    "prompt": "Summarize the plot of Romeo and Juliet in one paragraph.",
+    "assertions": [
+      {"type": "min_length_chars", "value": 100},
+      {"type": "max_length_chars", "value": 1000},
+      {"type": "not_contains", "value": "I cannot"},
+      {"type": "not_contains", "value": "I'm sorry"}
+    ]
+  },
+  {
+    "id": "performance",
+    "prompt": "What is 47 times 23?",
+    "assertions": [
+      {"type": "contains", "value": "1081"},
+      {"type": "latency_under", "value": 5000}
+    ]
+  },
+  {
+    "id": "cost_control",
+    "prompt": "Define photosynthesis briefly.",
+    "assertions": [
+      {"type": "cost_under", "value": 0.01},
+      {"type": "max_length_chars", "value": 500}
+    ]
+  }
+]
