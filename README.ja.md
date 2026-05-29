@@ -17,6 +17,10 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)](#)
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
+</p>
+
 ## 概要
 
 **Cli Modelarium** は、プロバイダー、モデル、システムプロンプト、温度パラメータ間でLLM出力を比較するための洗練されたコマンドラインツールです。ライブ並列ストリーミング、バッチ評価、決定論的テスト、品質スコアリングが組み込まれています。
