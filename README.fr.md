@@ -11,6 +11,7 @@ Note : Ce README est traduit à des fins d'accessibilité. L'outil CLI Cli Model
 
 > Comparez les sorties de LLM côte à côte depuis votre terminal - 8 fournisseurs cloud + modèles locaux, avec streaming parallèle, évaluation par lots, scoring LLM-as-judge, détection d'hallucinations et assertions prêtes pour CI/CD.
 
+[![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
