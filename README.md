@@ -13,6 +13,10 @@ Read this in other languages: [日本語](README.ja.md) | [Español](README.es.m
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)](#)
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
+</p>
+
 ## What it does
 
 **Cli Modelarium** is a polished command-line tool for comparing LLM outputs across providers, models, system prompts, and temperatures - with live parallel streaming, batch evaluation, deterministic testing, and quality scoring built in.
