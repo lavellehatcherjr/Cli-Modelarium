@@ -17,6 +17,10 @@ Nota: Este README é traduzido para acessibilidade. A própria ferramenta CLI Cl
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)](#)
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
+</p>
+
 ## O que ele faz
 
 **Cli Modelarium** é uma ferramenta de linha de comando refinada para comparar saídas de LLM entre provedores, modelos, prompts de sistema e temperaturas - com streaming paralelo ao vivo, avaliação em lote, testes determinísticos e pontuação de qualidade integrados.
