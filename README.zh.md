@@ -11,6 +11,7 @@
 
 > 在终端中并排比较 LLM 输出 - 8 个云服务提供商 + 本地模型，支持并行流式传输、批量评估、LLM-as-judge 评分、幻觉检测和 CI/CD 就绪的断言。
 
+[![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
