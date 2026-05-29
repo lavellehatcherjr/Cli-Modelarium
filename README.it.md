@@ -17,6 +17,10 @@ Nota: Questo README è tradotto per accessibilità. Lo strumento CLI Cli Modelar
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)](#)
 
+<p align="center">
+  <img src="docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
+</p>
+
 ## Cosa fa
 
 **Cli Modelarium** è uno strumento da riga di comando curato per confrontare gli output degli LLM tra provider, modelli, system prompt e temperature - con streaming parallelo live, valutazione batch, test deterministici e scoring di qualità integrati.
