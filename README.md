@@ -7,6 +7,7 @@ Read this in other languages: [日本語](README.ja.md) | [Español](README.es.m
 
 > Compare LLM outputs side-by-side from your terminal - 8 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
 
+[![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
