@@ -1,22 +1,21 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/cli-modelarium-wordmark-dark.svg">
-  <img alt="cli modelarium" src="docs/assets/cli-modelarium-wordmark-light.svg" width="420">
+  <img alt="cli modelarium" src="https://raw.githubusercontent.com/lavellehatcherjr/cli-modelarium/main/docs/assets/cli-modelarium-wordmark-light.png" width="420">
 </picture>
 
-Read this in other languages: [日本語](README.ja.md) | [Español](README.es.md) | [Français](README.fr.md) | [한국어](README.ko.md) | [中文](README.zh.md) | [Deutsch](README.de.md) | [Português](README.pt.md) | [Italiano](README.it.md)
+Read this in other languages: [日本語](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.ja.md) | [Español](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.es.md) | [Français](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.fr.md) | [한국어](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.ko.md) | [中文](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.zh.md) | [Deutsch](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.de.md) | [Português](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.pt.md) | [Italiano](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.it.md)
 
-> Compare LLM outputs side-by-side from your terminal - 8 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
+> Compare LLM outputs side-by-side from your terminal - 9 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
 
 [![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![Downloads](https://img.shields.io/pepy/dt/cli-modelarium)](https://pepy.tech/project/cli-modelarium)
-[![Downloads/Month](https://img.shields.io/pypi/dm/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
-[![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)](#)
+![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 <p align="center">
-  <img src="docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
+  <img src="https://raw.githubusercontent.com/lavellehatcherjr/cli-modelarium/main/docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
 </p>
 
 ## What it does
@@ -50,9 +49,9 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ## Features
 
-### 🤖 Providers (8 cloud + unlimited local)
+### 🤖 Providers (9 cloud + unlimited local)
 
-- **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter
+- **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope)
 - **Local models:** Ollama, LM Studio, vLLM, llama.cpp - any OpenAI-compatible local server
 - Mix-and-match local and cloud models in the same comparison
 - Configurable model selection per call (no hardcoded lists)
@@ -62,7 +61,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - Live token-by-token display across all models simultaneously
 - Time-to-First-Token (TTFT) tracking per model
 - See which model finishes first, watch outputs diverge in real time
-- Streams from all 8 providers (SSE under the hood)
+- Streams from all 9 providers (SSE under the hood)
 
 ### 📊 Multiple comparison modes
 
@@ -113,6 +112,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - Anthropic 529 "overloaded" handled separately from rate limits
 - `--concurrency` flag for power users on higher tiers
 - Graceful per-model failure (other models continue)
+- DashScope free-tier and flagship Qwen (qwen3.7-max) rate limits are tighter than most providers; lower `--concurrency` if you encounter 429s
 
 ### 🌐 Cross-platform
 
@@ -176,7 +176,7 @@ Customise the analysis:
 cli-modelarium "Q" \
   --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
   --runs 30 \
-  --judge mistral-large \
+  --judge mistral-large-latest \
   --significance-test mann-whitney \
   --correction holm \
   --significance-threshold 0.01
@@ -185,7 +185,7 @@ cli-modelarium "Q" \
 Opt out:
 
 ```bash
-cli-modelarium "Q" --models gpt-5.5,claude --runs 10 --no-significance
+cli-modelarium "Q" --models gpt-5.5,claude-opus-4-7 --runs 10 --no-significance
 ```
 
 ### Bootstrap confidence intervals (v0.1.3)
@@ -208,7 +208,7 @@ slightly across invocations because the bootstrap resampling is stochastic.
 Customise:
 
 ```bash
-cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
+cli-modelarium "Q" --models gpt-5.5,claude-opus-4-7 --runs 30 \
   --ci-level 0.99 \
   --ci-method percentile \
   --bootstrap-resamples 10000 \
@@ -218,7 +218,7 @@ cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
 Disable entirely:
 
 ```bash
-cli-modelarium "Q" --models gpt-5.5,claude --runs 30 --no-confidence-intervals
+cli-modelarium "Q" --models gpt-5.5,claude-opus-4-7 --runs 30 --no-confidence-intervals
 ```
 
 ### Paired tests for same-prompt comparisons (v0.1.3)
@@ -229,12 +229,12 @@ within-prompt correlation. Pick `paired-t` for roughly-normal score
 differences and `wilcoxon-signed` for ordinal or non-normal data.
 
 ```bash
-cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
+cli-modelarium "Q" --models gpt-5.5,claude-opus-4-7 --runs 30 \
   --significance-test paired-t
 ```
 
 ```bash
-cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
+cli-modelarium "Q" --models gpt-5.5,claude-opus-4-7 --runs 30 \
   --significance-test wilcoxon-signed
 ```
 
@@ -251,7 +251,7 @@ discordant counts (`n_discordant < 25`) and Edwards continuity-corrected
 chi-square otherwise.
 
 ```bash
-cli-modelarium "Q" --models gpt-5.5,claude --runs 30 \
+cli-modelarium "Q" --models gpt-5.5,claude-opus-4-7 --runs 30 \
   --check-hallucination --expected-facts facts.txt \
   --bootstrap-seed 42
 ```
@@ -336,7 +336,7 @@ The command exits with code 1 if pass rate drops below 90%, failing the build.
 
 ### More examples
 
-The [`examples/`](examples/) folder contains focused demo scripts for
+The [`examples/`](https://github.com/lavellehatcherjr/cli-modelarium/tree/main/examples) folder contains focused demo scripts for
 every major feature:
 
 - `basic_comparison.sh` - simple multi-model comparison
@@ -349,7 +349,7 @@ every major feature:
 - `ci_eval_suite.json` + `github_actions_workflow.yml` - CI/CD
   integration template
 
-See [`examples/README.md`](examples/README.md) for the full list.
+See [`examples/README.md`](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/examples/README.md) for the full list.
 
 ## Configuration
 
@@ -396,6 +396,7 @@ export XAI_API_KEY="xai-..."
 export DEEPSEEK_API_KEY="sk-..."
 export GROQ_API_KEY="gsk_..."
 export OPENROUTER_API_KEY="sk-or-..."
+export DASHSCOPE_API_KEY="sk-..."
 ```
 
 `cli-modelarium` checks environment variables before the OS keyring, so this works out of the box. If you prefer a keyring on Linux, install `gnome-keyring` (GNOME), KWallet (KDE), or `keyrings.alt` (file-based fallback).
@@ -422,11 +423,12 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | OpenAI (GPT-5, GPT-5 mini, o3, o4-mini, etc.) | ✅ | ✅ | ✅ |
 | Anthropic (Claude Opus 4.7, Sonnet 4.6, Haiku 4.5, etc.) | ✅ | ✅ | ✅ |
 | Google (Gemini 3.1 Pro, Gemini 3 Flash, etc.) | ✅ | ✅ | ✅ |
-| xAI (Grok 4.1, etc.) | ✅ | ✅ | ✅ |
-| DeepSeek (V3, R1) | ✅ | ✅ | ✅ |
+| xAI (Grok 4.3, etc.) | ✅ | ✅ | ✅ |
+| DeepSeek (V4 Pro, V4 Flash, etc.) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
 | Groq (Llama, Mixtral, etc.) | ✅ | ✅ | ✅ |
 | OpenRouter (any model on the platform) | ✅ | ✅ | ✅ |
+| Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; select Qwen models, International/Singapore) | ✅ | ✅ | ✅ |
 | **Local: Ollama** | ❌ | ✅ | Free |
 | **Local: LM Studio** | ❌ | ✅ | Free |
 | **Local: vLLM** | ❌ | ✅ | Free |
@@ -434,11 +436,37 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 Run `cli-modelarium list-models` to see all currently supported models.
 
+## Model groups
+
+Instead of listing model IDs, `--models` accepts a group shortcut. Groups are filtered against the providers you have configured, so a group only ever runs the models you actually have keys for.
+
+**Static groups** (fixed membership):
+
+| Group | Models |
+|-------|--------|
+| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-7, gemini-3.1-pro, grok-4.3, deepseek-v4-pro, mistral-large-latest |
+| `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
+| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest |
+| `all-fast` | claude-haiku-4-5, gemini-3-flash, grok-4.1-fast, deepseek-v4-flash, llama-3.3-70b-versatile |
+| `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
+| `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
+
+**Dynamic groups** (resolved at runtime):
+
+- `all` — every cloud model you have a configured API key for (excludes local models and OpenRouter). This can fan out to many models, so pair it with `--max-cost`.
+- `all-local` — every model reported by your running local server (Ollama / LM Studio / vLLM / llama.cpp). If no server is reachable, you get a clear message instead of an error.
+
+```bash
+cli-modelarium "Explain CAP theorem" --models all-budget
+cli-modelarium "Explain CAP theorem" --models all --max-cost 0.50
+cli-modelarium "Explain CAP theorem" --models all-local
+```
+
 ## How it works
 
 Cli Modelarium uses a modular provider abstraction layer that hides the API differences between OpenAI's `messages` array, Anthropic's top-level `system` parameter, Google's `system_instruction`, and others. Every provider implements the same async streaming interface, so the CLI can run them all in parallel with `asyncio.gather()`.
 
-Cost calculations come from each provider's reported `usage` field (input tokens, output tokens, cached tokens) multiplied by current pricing constants. Pricing data was verified from official provider documentation on **May 25, 2026** - see [Notes & Limitations](#notes--limitations) for caveats.
+Cost calculations come from each provider's reported `usage` field (input tokens, output tokens, cached tokens) multiplied by current pricing constants. Pricing data was verified from official provider documentation on **June 21, 2026** - see [Notes & Limitations](#notes--limitations) for caveats.
 
 For local models, the same OpenAI Python SDK is used with a custom `base_url`, since Ollama, LM Studio, vLLM, and llama.cpp all expose OpenAI-compatible REST endpoints.
 
@@ -446,15 +474,19 @@ For local models, the same OpenAI Python SDK is used with a custom `base_url`, s
 
 ### Pricing data
 
-All pricing built into Cli Modelarium was verified from official provider documentation on **May 25, 2026**. LLM pricing changes frequently (sometimes monthly). The tool displays the `pricing_as_of` date in every output. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
+All pricing built into Cli Modelarium was verified from official provider documentation on **June 21, 2026**. LLM pricing changes frequently (sometimes monthly). The tool displays the `pricing_as_of` date in every output. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
+
+Prices are each provider's standard/list public rate per 1M tokens (not batch, priority, off-peak, or promotional pricing); for input-size-tiered models the entry/short-context tier is shown, and cached pricing is the cache-read rate. DashScope/Qwen costs reflect non-thinking rates (the tool sends `enable_thinking=false`).
+
+Run `cli-modelarium pricing` (or `pricing --all`) for current per-model rates.
 
 ### Rate limits
 
-Rate limit handling and the default per-provider concurrency settings are based on provider rate limits verified **May 25, 2026**. Your specific tier's limits may differ from the defaults assumed here. Verify your current limits against the provider's official dashboard before building production capacity assumptions.
+Rate limit handling and the default per-provider concurrency settings are based on provider rate limits verified **June 21, 2026**. Your specific tier's limits may differ from the defaults assumed here. Verify your current limits against the provider's official dashboard before building production capacity assumptions.
 
 ### Model availability
 
-Models supported by Cli Modelarium reflect what providers offered on **May 25, 2026**. Providers regularly release new models, deprecate older ones, and adjust capabilities. If a model in the registry no longer works, run `cli-modelarium list-models` and check the provider's documentation.
+Models supported by Cli Modelarium reflect what providers offered on **June 21, 2026**. Providers regularly release new models, deprecate older ones, and adjust capabilities. If a model in the registry no longer works, run `cli-modelarium list-models` and check the provider's documentation.
 
 ### Not a production-grade gateway
 
@@ -495,7 +527,7 @@ Cli Modelarium was built by **[Lavelle Hatcher Jr](https://linkedin.com/in/lavel
 
 - 💼 LinkedIn: [linkedin.com/in/lavellehatcherjr](https://linkedin.com/in/lavellehatcherjr)
 - 🐙 GitHub: [github.com/lavellehatcherjr](https://github.com/lavellehatcherjr)
-- 💬 Questions about this project: [open an issue](../../issues)
+- 💬 Questions about this project: [open an issue](https://github.com/lavellehatcherjr/cli-modelarium/issues)
 - 📩 Collaboration/opportunities: reach out via LinkedIn
 
 ## Why I built this
@@ -510,15 +542,15 @@ Built with a modular provider abstraction, parallel execution, transparent cost 
 
 ## Contributing
 
-Issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Issues and PRs welcome. See [CONTRIBUTING.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/CONTRIBUTING.md) for guidelines.
 
-For security issues, please see [SECURITY.md](SECURITY.md) - do not file public issues for security concerns.
+For security issues, please see [SECURITY.md](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/SECURITY.md) - do not file public issues for security concerns.
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Licensed under the [Apache License, Version 2.0](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/LICENSE).
 
-See the [NOTICE](NOTICE) file for attribution requirements.
+See the [NOTICE](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/NOTICE) file for attribution requirements.
 
 ---
 
