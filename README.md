@@ -5,7 +5,7 @@
 
 Read this in other languages: [日本語](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.ja.md) | [Español](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.es.md) | [Français](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.fr.md) | [한국어](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.ko.md) | [中文](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.zh.md) | [Deutsch](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.de.md) | [Português](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.pt.md) | [Italiano](https://github.com/lavellehatcherjr/cli-modelarium/blob/main/README.it.md)
 
-> Compare LLM outputs side-by-side from your terminal - 9 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
+> Compare LLM outputs side-by-side from your terminal - 10 cloud providers + local models, with parallel streaming, batch evaluation, LLM-as-judge scoring, hallucination detection, and CI/CD-ready assertions.
 
 [![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -49,9 +49,9 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ## Features
 
-### 🤖 Providers (9 cloud + unlimited local)
+### 🤖 Providers (10 cloud + unlimited local)
 
-- **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope)
+- **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM)
 - **Local models:** Ollama, LM Studio, vLLM, llama.cpp - any OpenAI-compatible local server
 - Mix-and-match local and cloud models in the same comparison
 - Configurable model selection per call (no hardcoded lists)
@@ -61,7 +61,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 - Live token-by-token display across all models simultaneously
 - Time-to-First-Token (TTFT) tracking per model
 - See which model finishes first, watch outputs diverge in real time
-- Streams from all 9 providers (SSE under the hood)
+- Streams from all 10 providers (SSE under the hood)
 
 ### 📊 Multiple comparison modes
 
@@ -429,6 +429,7 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Groq (Llama, Mixtral, etc.) | ✅ | ✅ | ✅ |
 | OpenRouter (any model on the platform) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; select Qwen models, International/Singapore) | ✅ | ✅ | ✅ |
+| Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, etc.; OpenAI-compatible, overseas endpoint) | ✅ | ✅ | ✅ |
 | **Local: Ollama** | ❌ | ✅ | Free |
 | **Local: LM Studio** | ❌ | ✅ | Free |
 | **Local: vLLM** | ❌ | ✅ | Free |
