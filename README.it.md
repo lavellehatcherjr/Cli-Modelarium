@@ -9,15 +9,15 @@ Nota: Questo README è tradotto per accessibilità. Lo strumento CLI Cli Modelar
 
 > Note: Features added after v0.1.0 (`--runs` in v0.1.1, statistical significance in v0.1.2, confidence intervals/paired tests/McNemar in v0.1.3) are documented in English only — translations pending.
 
-> Confronta gli output degli LLM affiancati dal tuo terminale - 8 provider cloud + modelli locali, con streaming parallelo, valutazione batch, scoring LLM-as-judge, rilevamento delle allucinazioni e asserzioni pronte per CI/CD.
+> Confronta gli output degli LLM affiancati dal tuo terminale - 9 provider cloud + modelli locali, con streaming parallelo, valutazione batch, scoring LLM-as-judge, rilevamento delle allucinazioni e asserzioni pronte per CI/CD.
 
 [![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![Downloads](https://img.shields.io/pepy/dt/cli-modelarium)](https://pepy.tech/project/cli-modelarium)
-[![Downloads/Month](https://img.shields.io/pypi/dm/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![Platforms](https://img.shields.io/badge/platforms-Mac%20%7C%20Windows%20%7C%20Linux-lightgrey)](#)
+
 <p align="center">
   <img src="docs/assets/cli-modelarium-demo.png" alt="Cli Modelarium help output showing the banner and available commands" width="520">
 </p>
@@ -46,9 +46,9 @@ Ecco fatto. Si vedranno tutti e tre i modelli trasmettere le loro risposte in pa
 
 ## Funzionalità
 
-### 🤖 Provider (8 cloud + locali illimitati)
+### 🤖 Provider (9 cloud + locali illimitati)
 
-- **Provider cloud:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter
+- **Provider cloud:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope)
 - **Modelli locali:** Ollama, LM Studio, vLLM, llama.cpp - qualsiasi server locale compatibile con OpenAI
 - Combina modelli locali e cloud nello stesso confronto
 - Selezione del modello configurabile per chiamata (nessun elenco hardcoded)
@@ -58,7 +58,7 @@ Ecco fatto. Si vedranno tutti e tre i modelli trasmettere le loro risposte in pa
 - Visualizzazione live token per token su tutti i modelli contemporaneamente
 - Tracciamento Time-to-First-Token (TTFT) per modello
 - Vedere quale modello finisce per primo, osservare gli output divergere in tempo reale
-- Streams da tutti gli 8 provider (SSE sotto il cofano)
+- Streams da tutti i 9 provider (SSE sotto il cofano)
 
 ### 📊 Modalità di confronto multiple
 
@@ -108,6 +108,7 @@ Ecco fatto. Si vedranno tutti e tre i modelli trasmettere le loro risposte in pa
 - Il 529 "overloaded" di Anthropic è gestito separatamente dai limiti di velocità
 - Flag `--concurrency` per utenti avanzati su livelli superiori
 - Fallimento elegante per modello (gli altri modelli continuano)
+- I limiti di velocità del livello gratuito di DashScope e del modello Qwen di punta (qwen3.7-max) sono più restrittivi rispetto alla maggior parte dei provider; ridurre `--concurrency` se si incontrano errori 429
 
 ### 🌐 Multipiattaforma
 
@@ -262,11 +263,12 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | OpenAI (GPT-5, GPT-5 mini, o3, o4-mini, ecc.) | ✅ | ✅ | ✅ |
 | Anthropic (Claude Opus 4.7, Sonnet 4.6, Haiku 4.5, ecc.) | ✅ | ✅ | ✅ |
 | Google (Gemini 3.1 Pro, Gemini 3 Flash, ecc.) | ✅ | ✅ | ✅ |
-| xAI (Grok 4.1, ecc.) | ✅ | ✅ | ✅ |
-| DeepSeek (V3, R1) | ✅ | ✅ | ✅ |
+| xAI (Grok 4.3, ecc.) | ✅ | ✅ | ✅ |
+| DeepSeek (V4 Pro, V4 Flash, ecc.) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
 | Groq (Llama, Mixtral, ecc.) | ✅ | ✅ | ✅ |
 | OpenRouter (qualsiasi modello sulla piattaforma) | ✅ | ✅ | ✅ |
+| Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, ecc.; modelli Qwen selezionati, Internazionale/Singapore) | ✅ | ✅ | ✅ |
 | **Locale: Ollama** | ❌ | ✅ | Gratuito |
 | **Locale: LM Studio** | ❌ | ✅ | Gratuito |
 | **Locale: vLLM** | ❌ | ✅ | Gratuito |
@@ -274,11 +276,37 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 Eseguire `cli-modelarium list-models` per vedere tutti i modelli attualmente supportati.
 
+## Gruppi di modelli
+
+Invece di elencare gli ID dei modelli, `--models` accetta una scorciatoia di gruppo. I gruppi vengono filtrati in base ai provider che hai configurato, quindi un gruppo esegue sempre e solo i modelli per cui possiedi effettivamente le chiavi.
+
+**Gruppi statici** (composizione fissa):
+
+| Gruppo | Modelli |
+|-------|--------|
+| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-7, gemini-3.1-pro, grok-4.3, deepseek-v4-pro, mistral-large-latest |
+| `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
+| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest |
+| `all-fast` | claude-haiku-4-5, gemini-3-flash, grok-4.1-fast, deepseek-v4-flash, llama-3.3-70b-versatile |
+| `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
+| `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
+
+**Gruppi dinamici** (risolti a runtime):
+
+- `all` — ogni modello cloud per cui hai una chiave API configurata (esclude i modelli locali e OpenRouter). Questo può espandersi a molti modelli, quindi abbinalo a `--max-cost`.
+- `all-local` — ogni modello riportato dal tuo server locale in esecuzione (Ollama / LM Studio / vLLM / llama.cpp). Se nessun server è raggiungibile, ricevi un messaggio chiaro invece di un errore.
+
+```bash
+cli-modelarium "Spiega il teorema CAP" --models all-budget
+cli-modelarium "Spiega il teorema CAP" --models all --max-cost 0.50
+cli-modelarium "Spiega il teorema CAP" --models all-local
+```
+
 ## Come funziona
 
 Cli Modelarium usa un livello di astrazione del provider modulare che nasconde le differenze API tra l'array `messages` di OpenAI, il parametro `system` di livello superiore di Anthropic, il `system_instruction` di Google e altri. Ogni provider implementa la stessa interfaccia di streaming asincrono, quindi la CLI può eseguirli tutti in parallelo con `asyncio.gather()`.
 
-I calcoli dei costi provengono dal campo `usage` riportato da ciascun provider (token di input, token di output, token in cache) moltiplicato per le costanti di prezzo correnti. I dati sui prezzi sono stati verificati dalla documentazione ufficiale del provider il **25 maggio 2026** - vedere [Note e limitazioni](#note-e-limitazioni) per gli avvertimenti.
+I calcoli dei costi provengono dal campo `usage` riportato da ciascun provider (token di input, token di output, token in cache) moltiplicato per le costanti di prezzo correnti. I dati sui prezzi sono stati verificati dalla documentazione ufficiale del provider il **21 giugno 2026** - vedere [Note e limitazioni](#note-e-limitazioni) per gli avvertimenti.
 
 Per i modelli locali, viene usato lo stesso SDK Python OpenAI con una `base_url` personalizzata, poiché Ollama, LM Studio, vLLM e llama.cpp espongono tutti endpoint REST compatibili con OpenAI.
 
@@ -286,15 +314,19 @@ Per i modelli locali, viene usato lo stesso SDK Python OpenAI con una `base_url`
 
 ### Dati sui prezzi
 
-Tutti i prezzi integrati in Cli Modelarium sono stati verificati dalla documentazione ufficiale del provider il **25 maggio 2026**. I prezzi degli LLM cambiano frequentemente (a volte mensilmente). Lo strumento visualizza la data `pricing_as_of` in ogni output. Verificare sempre con la pagina dei prezzi ufficiale di ciascun provider prima di fare affidamento sui calcoli dei costi per il budgeting o le decisioni di produzione.
+Tutti i prezzi integrati in Cli Modelarium sono stati verificati dalla documentazione ufficiale del provider il **21 giugno 2026**. I prezzi degli LLM cambiano frequentemente (a volte mensilmente). Lo strumento visualizza la data `pricing_as_of` in ogni output. Verificare sempre con la pagina dei prezzi ufficiale di ciascun provider prima di fare affidamento sui calcoli dei costi per il budgeting o le decisioni di produzione.
+
+I prezzi sono la tariffa pubblica standard/di listino di ciascun provider per 1M di token (non i prezzi batch, prioritari, off-peak o promozionali); per i modelli con tariffe a livelli in base alla dimensione dell'input viene mostrato il livello iniziale/a contesto breve, e il prezzo in cache è la tariffa di lettura dalla cache. I costi di DashScope/Qwen riflettono le tariffe non-thinking (lo strumento invia `enable_thinking=false`).
+
+Eseguire `cli-modelarium pricing` (o `pricing --all`) per le tariffe correnti per modello.
 
 ### Limiti di velocità
 
-La gestione dei limiti di velocità e le impostazioni di concorrenza predefinite per provider si basano sui limiti di velocità del provider verificati il **25 maggio 2026**. I limiti del livello specifico possono differire dai default assunti qui. Verificare i limiti correnti rispetto alla dashboard ufficiale del provider prima di costruire ipotesi di capacità di produzione.
+La gestione dei limiti di velocità e le impostazioni di concorrenza predefinite per provider si basano sui limiti di velocità del provider verificati il **21 giugno 2026**. I limiti del livello specifico possono differire dai default assunti qui. Verificare i limiti correnti rispetto alla dashboard ufficiale del provider prima di costruire ipotesi di capacità di produzione.
 
 ### Disponibilità del modello
 
-I modelli supportati da Cli Modelarium riflettono ciò che i provider offrivano il **25 maggio 2026**. I provider rilasciano regolarmente nuovi modelli, depreca quelli più vecchi e ne adegua le capacità. Se un modello nel registro non funziona più, eseguire `cli-modelarium list-models` e controllare la documentazione del provider.
+I modelli supportati da Cli Modelarium riflettono ciò che i provider offrivano il **21 giugno 2026**. I provider rilasciano regolarmente nuovi modelli, depreca quelli più vecchi e ne adegua le capacità. Se un modello nel registro non funziona più, eseguire `cli-modelarium list-models` e controllare la documentazione del provider.
 
 ### Non è un gateway di produzione
 
