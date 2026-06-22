@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from cli_modelarium.providers.dashscope_provider import DashScopeProvider
 from cli_modelarium.providers.deepseek_provider import DeepSeekProvider
 from cli_modelarium.providers.groq_provider import GroqProvider
 from cli_modelarium.providers.openai_provider import OpenAIProvider
@@ -23,6 +24,11 @@ SUBCLASSES = [
     (DeepSeekProvider, "deepseek", "https://api.deepseek.com/v1"),
     (GroqProvider, "groq", "https://api.groq.com/openai/v1"),
     (OpenRouterProvider, "openrouter", "https://openrouter.ai/api/v1"),
+    (
+        DashScopeProvider,
+        "dashscope",
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    ),
 ]
 
 
@@ -79,7 +85,7 @@ def test_openrouter_sends_required_headers(monkeypatch: pytest.MonkeyPatch) -> N
     assert headers["X-Title"] == "Cli Modelarium"
 
 
-@pytest.mark.parametrize("cls", [XAIProvider, DeepSeekProvider, GroqProvider])
+@pytest.mark.parametrize("cls", [XAIProvider, DeepSeekProvider, GroqProvider, DashScopeProvider])
 def test_non_openrouter_subclasses_do_not_send_default_headers(
     cls: type, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -97,7 +103,10 @@ def test_non_openrouter_subclasses_do_not_send_default_headers(
     assert "default_headers" not in captured
 
 
-@pytest.mark.parametrize("cls", [XAIProvider, DeepSeekProvider, GroqProvider, OpenRouterProvider])
+@pytest.mark.parametrize(
+    "cls",
+    [XAIProvider, DeepSeekProvider, GroqProvider, OpenRouterProvider, DashScopeProvider],
+)
 def test_subclass_inherits_stream_and_complete(cls: type) -> None:
     """The OpenAI-compat subclasses must NOT override stream/complete - they inherit."""
     # The methods should be defined on OpenAIProvider, not on the subclass itself.
