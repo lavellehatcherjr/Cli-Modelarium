@@ -10,6 +10,9 @@ on:
       - 'prompts/**'
       - 'eval_suite.json'
 
+permissions:
+  contents: read
+
 jobs:
   evaluate:
     runs-on: ubuntu-latest
