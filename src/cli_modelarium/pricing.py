@@ -1,6 +1,6 @@
 """Pricing data and cost calculation for all supported models.
 
-Pricing is per 1M tokens, in USD. Verified May 25, 2026 from each provider's
+Pricing is per 1M tokens, in USD. Verified June 22, 2026 from each provider's
 official documentation. LLM pricing changes frequently - re-verify against
 the provider's pricing page before relying on these values for production
 budgeting.
@@ -17,29 +17,37 @@ from __future__ import annotations
 
 from cli_modelarium.exceptions import UnknownModelError
 
-PRICING_AS_OF = "2026-05-25"
+# Prices are each provider's STANDARD / LIST public pay-as-you-go rate per 1M tokens -
+# NOT batch, priority/flex, off-peak, or promotional pricing.
+# For models tiered by input size (OpenAI, Gemini, and Qwen flagships), the entry /
+# short-context tier is stored. `cached_input` = the provider's cache-read / implicit-cache
+# rate (not cache-write/creation). DeepSeek rates are standard-hours (not off-peak).
+# Qwen flagship rates are list price (the time-limited promo is NOT used).
+# Verified against first-party provider pages on the PRICING_AS_OF date.
+PRICING_AS_OF = "2026-06-22"
 
 PRICING: dict[str, dict[str, float | str | bool]] = {
     # ===== OpenAI =====
+    # Verified 2026-06-22.
     "gpt-5.5": {"input": 5.00, "output": 30.00, "cached_input": 0.50, "provider": "openai"},
     "gpt-5.5-pro": {"input": 30.00, "output": 180.00, "provider": "openai"},
-    "gpt-5.4": {"input": 2.50, "output": 15.00, "cached_input": 1.25, "provider": "openai"},
-    "gpt-5.4-mini": {"input": 0.75, "output": 4.50, "cached_input": 0.40, "provider": "openai"},
-    "gpt-5.4-nano": {"input": 0.20, "output": 1.25, "cached_input": 0.10, "provider": "openai"},
-    "gpt-5.4-pro": {"input": 15.00, "output": 60.00, "provider": "openai"},
+    "gpt-5.4": {"input": 2.50, "output": 15.00, "cached_input": 0.25, "provider": "openai"},
+    "gpt-5.4-mini": {"input": 0.75, "output": 4.50, "cached_input": 0.075, "provider": "openai"},
+    "gpt-5.4-nano": {"input": 0.20, "output": 1.25, "cached_input": 0.02, "provider": "openai"},
+    "gpt-5.4-pro": {"input": 30.00, "output": 180.00, "provider": "openai"},
     "gpt-5.3-codex": {"input": 1.75, "output": 14.00, "provider": "openai"},
     "gpt-5.3-codex-spark": {"input": 0.50, "output": 2.00, "provider": "openai"},
-    "o3": {"input": 15.00, "output": 60.00, "cached_input": 7.50, "provider": "openai"},
-    "o3-pro": {"input": 30.00, "output": 120.00, "provider": "openai"},
-    "o4-mini": {"input": 1.10, "output": 4.40, "cached_input": 0.55, "provider": "openai"},
+    "o3": {"input": 2.00, "output": 8.00, "cached_input": 0.50, "provider": "openai"},
+    "o3-pro": {"input": 20.00, "output": 80.00, "provider": "openai"},
+    "o4-mini": {"input": 1.10, "output": 4.40, "cached_input": 0.275, "provider": "openai"},
     "gpt-oss-120b": {"input": 0.30, "output": 0.60, "provider": "openai"},
     "gpt-oss-20b": {"input": 0.10, "output": 0.30, "provider": "openai"},
-    "gpt-5": {"input": 1.25, "output": 10.00, "provider": "openai"},
-    "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "provider": "openai"},
-    "gpt-4o": {"input": 2.50, "output": 10.00, "provider": "openai"},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "provider": "openai"},
+    "gpt-5": {"input": 1.25, "output": 10.00, "cached_input": 0.125, "provider": "openai"},
+    "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "cached_input": 0.10, "provider": "openai"},
+    "gpt-4o": {"input": 2.50, "output": 10.00, "cached_input": 1.25, "provider": "openai"},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "cached_input": 0.075, "provider": "openai"},
     # ===== Anthropic =====
-    # Verified against Anthropic's pricing page May 25, 2026.
+    # Verified 2026-06-22.
     "claude-opus-4-7": {
         "input": 5.00,
         "output": 25.00,
@@ -64,60 +72,114 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
         "cached_input": 0.50,
         "provider": "anthropic",
     },
+    "claude-fable-5": {
+        "input": 10.00,
+        "output": 50.00,
+        "cached_input": 1.00,
+        "provider": "anthropic",
+    },
+    "claude-opus-4-8": {
+        "input": 5.00,
+        "output": 25.00,
+        "cached_input": 0.50,
+        "provider": "anthropic",
+    },
+    "claude-opus-4-5": {
+        "input": 5.00,
+        "output": 25.00,
+        "cached_input": 0.50,
+        "provider": "anthropic",
+    },
+    "claude-sonnet-4-5": {
+        "input": 3.00,
+        "output": 15.00,
+        "cached_input": 0.30,
+        "provider": "anthropic",
+    },
     # ===== Google Gemini (Google uses dots in model IDs) =====
-    "gemini-3.5-flash": {"input": 0.50, "output": 3.00, "provider": "google"},
-    "gemini-3.1-pro": {"input": 1.25, "output": 5.00, "cached_input": 0.625, "provider": "google"},
-    "gemini-3.1-flash-lite": {"input": 0.10, "output": 0.40, "provider": "google"},
-    "gemini-3-flash": {"input": 0.30, "output": 2.50, "provider": "google"},
-    "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "provider": "google"},
-    "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40, "provider": "google"},
-    # ===== xAI Grok (xAI uses dots in model IDs) =====
-    "grok-4.3": {"input": 1.25, "output": 2.50, "cached_input": 0.20, "provider": "xai"},
-    "grok-4.20": {"input": 2.00, "output": 6.00, "cached_input": 0.20, "provider": "xai"},
-    "grok-4.20-multi-agent-beta": {
+    # Verified 2026-06-22.
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.00, "cached_input": 0.15, "provider": "google"},
+    "gemini-3.1-pro-preview": {
         "input": 2.00,
-        "output": 6.00,
+        "output": 12.00,
+        "cached_input": 0.20,
+        "provider": "google",
+    },
+    "gemini-3.1-flash-lite": {
+        "input": 0.25,
+        "output": 1.50,
+        "cached_input": 0.025,
+        "provider": "google",
+    },
+    "gemini-3-flash": {"input": 0.30, "output": 2.50, "provider": "google"},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "cached_input": 0.03, "provider": "google"},
+    "gemini-2.5-flash-lite": {
+        "input": 0.10,
+        "output": 0.40,
+        "cached_input": 0.01,
+        "provider": "google",
+    },
+    # ===== xAI Grok (xAI uses dots in model IDs) =====
+    # Verified 2026-06-22.
+    "grok-4.3": {"input": 1.25, "output": 2.50, "cached_input": 0.20, "provider": "xai"},
+    "grok-4.20-0309-non-reasoning": {
+        "input": 1.25,
+        "output": 2.50,
+        "cached_input": 0.20,
+        "provider": "xai",
+    },
+    "grok-4.20-multi-agent-0309": {
+        "input": 1.25,
+        "output": 2.50,
         "cached_input": 0.20,
         "provider": "xai",
     },
     "grok-4.1-fast": {"input": 0.20, "output": 0.50, "cached_input": 0.05, "provider": "xai"},
     "grok-build-0.1": {"input": 1.00, "output": 2.00, "cached_input": 0.20, "provider": "xai"},
     # ===== DeepSeek =====
+    # Verified 2026-06-22.
     "deepseek-v4-pro": {
-        "input": 0.55,
-        "output": 2.19,
-        "cached_input": 0.055,
+        "input": 0.435,
+        "output": 0.87,
+        "cached_input": 0.003625,
         "provider": "deepseek",
     },
     "deepseek-v4-flash": {
-        "input": 0.27,
-        "output": 1.10,
-        "cached_input": 0.027,
+        "input": 0.14,
+        "output": 0.28,
+        "cached_input": 0.0028,
         "provider": "deepseek",
     },
     # Legacy aliases - deprecating July 24, 2026; kept for backward compatibility.
-    "deepseek-chat": {"input": 0.27, "output": 1.10, "cached_input": 0.027, "provider": "deepseek"},
+    "deepseek-chat": {
+        "input": 0.14,
+        "output": 0.28,
+        "cached_input": 0.0028,
+        "provider": "deepseek",
+    },
     "deepseek-reasoner": {
-        "input": 0.27,
-        "output": 1.10,
-        "cached_input": 0.027,
+        "input": 0.14,
+        "output": 0.28,
+        "cached_input": 0.0028,
         "provider": "deepseek",
     },
     # ===== Mistral =====
-    "mistral-medium-3.5": {"input": 0.40, "output": 2.00, "provider": "mistral"},
-    "mistral-medium-latest": {"input": 0.40, "output": 2.00, "provider": "mistral"},
+    # Verified 2026-06-22.
+    "mistral-medium-3.5": {"input": 1.50, "output": 7.50, "provider": "mistral"},
+    "mistral-medium-latest": {"input": 1.50, "output": 7.50, "provider": "mistral"},
     "mistral-large-latest": {"input": 0.50, "output": 1.50, "provider": "mistral"},
-    "mistral-small-latest": {"input": 0.15, "output": 0.60, "provider": "mistral"},
+    "mistral-small-latest": {"input": 0.10, "output": 0.30, "provider": "mistral"},
     "codestral-latest": {"input": 0.30, "output": 0.90, "provider": "mistral"},
     "magistral-medium-latest": {"input": 2.00, "output": 5.00, "provider": "mistral"},
     "magistral-small-latest": {"input": 0.50, "output": 1.50, "provider": "mistral"},
     # ===== Groq =====
+    # Verified 2026-06-22.
     "llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79, "provider": "groq"},
-    "openai/gpt-oss-120b": {"input": 0.30, "output": 0.60, "provider": "groq"},
-    "openai/gpt-oss-safeguard-20b": {"input": 0.10, "output": 0.30, "provider": "groq"},
+    "openai/gpt-oss-120b": {"input": 0.15, "output": 0.60, "provider": "groq"},
+    "openai/gpt-oss-safeguard-20b": {"input": 0.075, "output": 0.30, "provider": "groq"},
     "meta-llama/llama-4-scout-17b-16e-instruct": {
-        "input": 0.20,
-        "output": 0.30,
+        "input": 0.11,
+        "output": 0.34,
         "provider": "groq",
     },
     # ===== OpenRouter =====
@@ -137,6 +199,39 @@ PRICING: dict[str, dict[str, float | str | bool]] = {
     },
     "openai/gpt-oss-120b:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
     "zhipuai/glm-4.7-flash:free": {"input": 0.0, "output": 0.0, "provider": "openrouter"},
+    # ===== DashScope (Alibaba Model Studio, International/Singapore endpoint) =====
+    # Single rate per entry = entry input-tier, non-thinking output (we send
+    # enable_thinking=false). cached_input = Implicit-Cache read rate where offered.
+    # Verified 2026-06-22.
+    "qwen3.7-max": {"input": 2.50, "output": 7.50, "cached_input": 0.50, "provider": "dashscope"},
+    "qwen3.7-plus": {"input": 0.40, "output": 1.60, "cached_input": 0.08, "provider": "dashscope"},
+    "qwen3.6-flash": {"input": 0.25, "output": 1.50, "provider": "dashscope"},
+    "qwen3.6-plus": {"input": 0.50, "output": 3.00, "provider": "dashscope"},
+    "qwen-flash": {"input": 0.05, "output": 0.40, "cached_input": 0.01, "provider": "dashscope"},
+    "qwen3-coder-plus": {
+        "input": 1.00,
+        "output": 5.00,
+        "cached_input": 0.20,
+        "provider": "dashscope",
+    },
+    # ===== Z.AI / GLM (Zhipu AI, OpenAI-compatible overseas endpoint) =====
+    # cached_input = Z.AI's "Cached Input" (cache-read) rate; "Cached Input Storage"
+    # (limited-time free) has no field. Text models only (vision glm-5v-turbo excluded).
+    # Verified against Z.AI's pricing page (docs.z.ai), 2026-06-22.
+    "glm-5.2": {"input": 1.40, "output": 4.40, "cached_input": 0.26, "provider": "zai"},
+    "glm-5.1": {"input": 1.40, "output": 4.40, "cached_input": 0.26, "provider": "zai"},
+    "glm-5": {"input": 1.00, "output": 3.20, "cached_input": 0.20, "provider": "zai"},
+    "glm-5-turbo": {"input": 1.20, "output": 4.00, "cached_input": 0.24, "provider": "zai"},
+    "glm-4.7": {"input": 0.60, "output": 2.20, "cached_input": 0.11, "provider": "zai"},
+    "glm-4.7-flash": {"input": 0.00, "output": 0.00, "cached_input": 0.00, "provider": "zai"},
+    "glm-4.7-flashx": {"input": 0.07, "output": 0.40, "cached_input": 0.01, "provider": "zai"},
+    "glm-4.6": {"input": 0.60, "output": 2.20, "cached_input": 0.11, "provider": "zai"},
+    "glm-4.5": {"input": 0.60, "output": 2.20, "cached_input": 0.11, "provider": "zai"},
+    "glm-4.5-air": {"input": 0.20, "output": 1.10, "cached_input": 0.03, "provider": "zai"},
+    "glm-4.5-x": {"input": 2.20, "output": 8.90, "cached_input": 0.45, "provider": "zai"},
+    "glm-4.5-airx": {"input": 1.10, "output": 4.50, "cached_input": 0.22, "provider": "zai"},
+    "glm-4.5-flash": {"input": 0.00, "output": 0.00, "cached_input": 0.00, "provider": "zai"},
+    "glm-4-32b-0414-128k": {"input": 0.10, "output": 0.10, "provider": "zai"},
     # ===== Local =====
     # Wildcard entry. Any model with `local/` prefix resolves here and costs $0.
     "local/*": {"input": 0.0, "output": 0.0, "provider": "local", "is_local": True},
