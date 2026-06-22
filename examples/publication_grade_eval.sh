@@ -14,7 +14,7 @@ set -euo pipefail
 cli-modelarium "Explain the theory of relativity in one paragraph." \
   --models gpt-5.5,claude-opus-4-7 \
   --runs 30 \
-  --judge gemini-3.1-pro \
+  --judge gemini-3.1-pro-preview \
   --significance-test paired-t \
   --confidence-intervals \
   --ci-level 0.95 \
