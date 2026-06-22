@@ -23,11 +23,12 @@ class TestGetProviderForModel:
         [
             ("gpt-5.5", "openai"),
             ("claude-opus-4-7", "anthropic"),
-            ("gemini-3.1-pro", "google"),
+            ("gemini-3.1-pro-preview", "google"),
             ("grok-4.3", "xai"),
             ("deepseek-v4-pro", "deepseek"),
             ("mistral-large-latest", "mistral"),
             ("llama-3.3-70b-versatile", "groq"),
+            ("qwen3.7-max", "dashscope"),
             ("local/llama-3.3", "local"),
             ("local/any-string", "local"),
         ],
@@ -70,6 +71,7 @@ class TestAllKnownProviders:
             "deepseek",
             "mistral",
             "groq",
+            "dashscope",
             "local",
         }
         # The registry should contain at least the 8 cloud providers + local.
@@ -96,8 +98,8 @@ class TestExpandGroup:
     def test_premium_includes_flagships(self) -> None:
         expanded = expand_group("all-premium")
         assert "gpt-5.5" in expanded
-        assert "claude-opus-4-7" in expanded
-        assert "gemini-3.1-pro" in expanded
+        assert "claude-opus-4-8" in expanded
+        assert "gemini-3.1-pro-preview" in expanded
 
     def test_budget_includes_cheap_models(self) -> None:
         expanded = expand_group("all-budget")
@@ -141,12 +143,12 @@ class TestParseModelsArg:
     def test_group_expanded_in_place(self) -> None:
         expanded = parse_models_arg("all-premium")
         assert "gpt-5.5" in expanded
-        assert "claude-opus-4-7" in expanded
+        assert "claude-opus-4-8" in expanded
         assert "all-premium" not in expanded
 
     def test_group_and_explicit_mixed(self) -> None:
         expanded = parse_models_arg("all-premium,local/llama-3.3")
-        assert "claude-opus-4-7" in expanded
+        assert "claude-opus-4-8" in expanded
         assert "local/llama-3.3" in expanded
 
     def test_dynamic_group_preserved_for_caller(self) -> None:
