@@ -357,7 +357,7 @@ class TestRunJudging:
 
         results = await run_judging(
             items=items,
-            judge_models=["claude-haiku-4-5", "gemini-3.1-pro"],
+            judge_models=["claude-haiku-4-5", "gemini-3.1-pro-preview"],
             criteria=["x"],
             provider_factory=lambda _: provider,
             skip_self_eval=True,
