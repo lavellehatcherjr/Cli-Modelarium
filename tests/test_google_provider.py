@@ -114,10 +114,10 @@ async def test_complete_returns_full_text(monkeypatch: pytest.MonkeyPatch) -> No
     chunks = _build_chunks(["Hello", ", ", "world!"], input_tokens=10, output_tokens=3)
     provider, _ = _make_provider(monkeypatch, chunks=chunks)
 
-    result = await provider.complete("hi", "gemini-3.1-pro", 0.0)
+    result = await provider.complete("hi", "gemini-3.1-pro-preview", 0.0)
 
     assert result.output == "Hello, world!"
-    assert result.model == "gemini-3.1-pro"
+    assert result.model == "gemini-3.1-pro-preview"
     assert result.provider == "google"
     assert result.error is None
 
@@ -126,7 +126,7 @@ async def test_complete_captures_token_counts(monkeypatch: pytest.MonkeyPatch) -
     chunks = _build_chunks(["x"], input_tokens=42, output_tokens=7, cached_tokens=11)
     provider, _ = _make_provider(monkeypatch, chunks=chunks)
 
-    result = await provider.complete("p", "gemini-3.1-pro", 0.0)
+    result = await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
 
     assert result.input_tokens == 42
     assert result.output_tokens == 7
@@ -134,13 +134,13 @@ async def test_complete_captures_token_counts(monkeypatch: pytest.MonkeyPatch) -
 
 
 async def test_complete_calculates_cost(monkeypatch: pytest.MonkeyPatch) -> None:
-    # gemini-3.1-pro: $1.25/M input, $5.00/M output.
+    # gemini-3.1-pro-preview: $2.00/M input, $12.00/M output.
     chunks = _build_chunks(["x"], input_tokens=1_000_000, output_tokens=1_000_000)
     provider, _ = _make_provider(monkeypatch, chunks=chunks)
 
-    result = await provider.complete("p", "gemini-3.1-pro", 0.0)
+    result = await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
 
-    assert result.cost_usd == pytest.approx(6.25)
+    assert result.cost_usd == pytest.approx(14.00)
 
 
 async def test_system_prompt_in_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -148,7 +148,9 @@ async def test_system_prompt_in_config(monkeypatch: pytest.MonkeyPatch) -> None:
     chunks = _build_chunks(["ok"], input_tokens=1, output_tokens=1)
     provider, models = _make_provider(monkeypatch, chunks=chunks)
 
-    await provider.complete("user prompt", "gemini-3.1-pro", 0.0, system_prompt="you are helpful")
+    await provider.complete(
+        "user prompt", "gemini-3.1-pro-preview", 0.0, system_prompt="you are helpful"
+    )
 
     config = models.last_kwargs["config"]
     assert config["system_instruction"] == "you are helpful"
@@ -160,7 +162,7 @@ async def test_no_system_prompt_omits_system_instruction(monkeypatch: pytest.Mon
     chunks = _build_chunks(["ok"], input_tokens=1, output_tokens=1)
     provider, models = _make_provider(monkeypatch, chunks=chunks)
 
-    await provider.complete("p", "gemini-3.1-pro", 0.0)
+    await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
 
     config = models.last_kwargs["config"]
     assert "system_instruction" not in config
@@ -170,7 +172,7 @@ async def test_temperature_passed_in_config(monkeypatch: pytest.MonkeyPatch) -> 
     chunks = _build_chunks(["x"], input_tokens=1, output_tokens=1)
     provider, models = _make_provider(monkeypatch, chunks=chunks)
 
-    await provider.complete("p", "gemini-3.1-pro", 0.7)
+    await provider.complete("p", "gemini-3.1-pro-preview", 0.7)
 
     assert models.last_kwargs["config"]["temperature"] == 0.7
 
@@ -179,7 +181,7 @@ async def test_records_ttft_and_latency(monkeypatch: pytest.MonkeyPatch) -> None
     chunks = _build_chunks(["a", "b"], input_tokens=1, output_tokens=2)
     provider, _ = _make_provider(monkeypatch, chunks=chunks)
 
-    result = await provider.complete("p", "gemini-3.1-pro", 0.0)
+    result = await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
 
     assert result.ttft_ms is not None
     assert result.latency_ms >= (result.ttft_ms or 0)
@@ -193,7 +195,7 @@ async def test_stream_yields_text_chunks(monkeypatch: pytest.MonkeyPatch) -> Non
     provider, _ = _make_provider(monkeypatch, chunks=chunks)
 
     collected: list[str] = []
-    async for chunk in provider.stream("p", "gemini-3.1-pro", 0.0):
+    async for chunk in provider.stream("p", "gemini-3.1-pro-preview", 0.0):
         collected.append(chunk)
 
     assert collected == ["one", " two", " three"]
@@ -215,7 +217,7 @@ async def test_401_translated_to_authentication_error(monkeypatch: pytest.Monkey
     provider, _ = _make_provider(monkeypatch, error=err)
 
     with pytest.raises(AuthenticationError) as exc_info:
-        await provider.complete("p", "gemini-3.1-pro", 0.0)
+        await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
 
     assert "Leaked" not in str(exc_info.value)
     assert exc_info.value.provider == "google"
@@ -226,7 +228,7 @@ async def test_403_translated_to_authentication_error(monkeypatch: pytest.Monkey
     provider, _ = _make_provider(monkeypatch, error=err)
 
     with pytest.raises(AuthenticationError):
-        await provider.complete("p", "gemini-3.1-pro", 0.0)
+        await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
 
 
 async def test_429_translated_to_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -234,7 +236,7 @@ async def test_429_translated_to_rate_limit(monkeypatch: pytest.MonkeyPatch) -> 
     provider, _ = _make_provider(monkeypatch, error=err)
 
     with pytest.raises(RateLimitError) as exc_info:
-        await provider.complete("p", "gemini-3.1-pro", 0.0)
+        await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
 
     assert exc_info.value.provider == "google"
 
@@ -248,4 +250,4 @@ async def test_500_translated_to_provider_error(monkeypatch: pytest.MonkeyPatch)
     provider, _ = _make_provider(monkeypatch, error=err)
 
     with pytest.raises(ProviderError):
-        await provider.complete("p", "gemini-3.1-pro", 0.0)
+        await provider.complete("p", "gemini-3.1-pro-preview", 0.0)
