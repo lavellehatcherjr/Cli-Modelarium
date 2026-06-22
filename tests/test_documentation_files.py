@@ -78,9 +78,9 @@ class TestGitHubConfig:
         assert on_key in parsed
         assert "test" in parsed["jobs"]
         matrix = parsed["jobs"]["test"]["strategy"]["matrix"]
-        # The spec requires 3 OS x 3 Python versions = 9 jobs.
+        # The spec requires 3 OS x 4 Python versions = 12 jobs.
         assert len(matrix["os"]) == 3
-        assert len(matrix["python-version"]) == 3
+        assert len(matrix["python-version"]) == 4
 
     @pytest.mark.skipif(not HAS_YAML, reason="PyYAML not installed")
     def test_dependabot_parses_as_yaml(self) -> None:
