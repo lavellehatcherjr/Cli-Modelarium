@@ -8,7 +8,7 @@
 set -euo pipefail
 
 cli-modelarium "What is quantum computing in one paragraph?" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview \
   --runs 10 \
   --output reproducibility_results.csv \
   --output-format csv
