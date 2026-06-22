@@ -56,7 +56,7 @@ dependencies = [
 [project.optional-dependencies]
 schema = ["jsonschema~=4.26"]
 dev = [
-    "pytest~=9.0.3",
+    "pytest~=9.1.1",
     "pytest-asyncio~=1.3",
     "pytest-cov~=7.1",
     "ruff~=0.15",
