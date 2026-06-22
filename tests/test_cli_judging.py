@@ -187,7 +187,7 @@ class TestJudgesPanel:
                 "--models",
                 "gpt-5.5",
                 "--judges",
-                "claude-opus-4-7,gemini-3.1-pro,grok-4.3",
+                "claude-opus-4-7,gemini-3.1-pro-preview,grok-4.3",
                 "--no-stream",
                 "--no-judge-tos",
             ],
@@ -199,7 +199,7 @@ class TestJudgesPanel:
         judge_calls = [c for c in dual_provider.calls if c["is_judge_call"]]
         assert len(judge_calls) == 3
         judge_models = {c["model"] for c in judge_calls}
-        assert judge_models == {"claude-opus-4-7", "gemini-3.1-pro", "grok-4.3"}
+        assert judge_models == {"claude-opus-4-7", "gemini-3.1-pro-preview", "grok-4.3"}
 
 
 # ===== --judge-criteria =====
@@ -400,7 +400,7 @@ class TestMutualExclusion:
                 "--judge",
                 "claude-opus-4-7",
                 "--judges",
-                "claude-opus-4-7,gemini-3.1-pro",
+                "claude-opus-4-7,gemini-3.1-pro-preview",
                 "--no-stream",
             ],
         )
@@ -578,7 +578,7 @@ class TestBatchWithJudges:
                 "--models",
                 "gpt-5.5",
                 "--judges",
-                "claude-opus-4-7,gemini-3.1-pro",
+                "claude-opus-4-7,gemini-3.1-pro-preview",
                 "--output",
                 str(output),
                 "--no-judge-tos",
@@ -596,5 +596,5 @@ class TestBatchWithJudges:
         assert len(first["judges"]) == 2
         assert {j["model"] for j in first["judges"]} == {
             "claude-opus-4-7",
-            "gemini-3.1-pro",
+            "gemini-3.1-pro-preview",
         }
