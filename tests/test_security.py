@@ -34,6 +34,7 @@ class TestValidateKey:
             ("openrouter", "sk-or-abc123XYZ456DEF789ghi"),
             ("deepseek", "sk-abc123XYZ456DEF789ghi"),
             ("mistral", "abc123XYZ456DEF789ghi0"),
+            ("dashscope", "sk-xxxxxxxxxxxxxxxxxxxx"),
         ],
     )
     def test_valid_formats(self, provider: str, key: str) -> None:
@@ -164,6 +165,25 @@ class TestKeyringIntegration:
     def test_env_var_is_stripped(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OPENAI_API_KEY", "  sk-proj-padded1234567890abcdefghi  ")
         assert security.load_key("openai") == "sk-proj-padded1234567890abcdefghi"
+
+    def test_gemini_api_key_alias_for_google(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GEMINI_API_KEY is accepted as a fallback for the google provider.
+        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini1234567890abcdef1234567890")
+        assert security.load_key("google") == "AIzaGemini1234567890abcdef1234567890"
+
+    def test_google_api_key_takes_precedence_over_gemini(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GOOGLE_API_KEY", "AIzaGoogle1234567890abcdef1234567890")
+        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini1234567890abcdef1234567890")
+        assert security.load_key("google") == "AIzaGoogle1234567890abcdef1234567890"
+
+    def test_gemini_alias_does_not_leak_to_other_providers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The alias is google-only; GEMINI_API_KEY must not satisfy openai.
+        monkeypatch.setenv("GEMINI_API_KEY", "AIzaGemini1234567890abcdef1234567890")
+        assert security.load_key("openai") is None
 
     def test_is_key_configured_via_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("XAI_API_KEY", "xai-test1234567890abcdefghi")
