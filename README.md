@@ -41,7 +41,7 @@ cli-modelarium configure
 
 # Run your first comparison
 cli-modelarium "Explain quantum computing in one sentence" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
+  --models gpt-5.5,claude-opus-4-8,gemini-3.1-pro-preview \
   --temperatures 0,0.7
 ```
 
@@ -52,9 +52,9 @@ That's it. You'll see all three models stream their responses live in parallel, 
 ### 🤖 Providers (10 cloud + unlimited local)
 
 - **Cloud providers:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM)
-- **Local models:** Ollama, LM Studio, vLLM, llama.cpp - any OpenAI-compatible local server
+- **Local models:** Ollama, LM Studio, vLLM, llama.cpp - any OpenAI-compatible server running on localhost
 - Mix-and-match local and cloud models in the same comparison
-- Configurable model selection per call (no hardcoded lists)
+- Choose any registered model id per call - not limited to the built-in group shortcuts
 
 ### ⚡ Parallel streaming
 
@@ -135,7 +135,7 @@ That's it. You'll see all three models stream their responses live in parallel, 
 
 ```bash
 cli-modelarium "Write a Python function to find the longest palindromic substring" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview
 ```
 
 ### Reproducibility analysis - run N times and see variance
@@ -162,7 +162,7 @@ to [scipy](https://scipy.org/) so results match the scientific Python ecosystem.
 cli-modelarium "Solve this math problem step by step" \
   --models gpt-5.5,claude-opus-4-7 \
   --runs 20 \
-  --judge gemini-3.1-pro
+  --judge gemini-3.1-pro-preview
 ```
 
 The output adds a "Statistical Significance Tests" block with pairwise
@@ -174,7 +174,7 @@ Customise the analysis:
 
 ```bash
 cli-modelarium "Q" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview \
   --runs 30 \
   --judge mistral-large-latest \
   --significance-test mann-whitney \
@@ -295,7 +295,7 @@ cli-modelarium batch eval.json \
 
 ```bash
 cli-modelarium "Explain recursion in one paragraph" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro,local/llama-3.3-70b \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview,local/llama-3.3-70b \
   --judge claude-opus-4-7 \
   --judge-criteria "accuracy,clarity,brevity"
 ```
@@ -421,8 +421,8 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Provider | API Keys Needed | Streaming | Cost Tracking |
 |----------|-----------------|-----------|---------------|
 | OpenAI (GPT-5, GPT-5 mini, o3, o4-mini, etc.) | ✅ | ✅ | ✅ |
-| Anthropic (Claude Opus 4.7, Sonnet 4.6, Haiku 4.5, etc.) | ✅ | ✅ | ✅ |
-| Google (Gemini 3.1 Pro, Gemini 3 Flash, etc.) | ✅ | ✅ | ✅ |
+| Anthropic (Claude Opus 4.8, Sonnet 4.6, Haiku 4.5, etc.) | ✅ | ✅ | ✅ |
+| Google (Gemini 3.5 Flash, Gemini 3.1 Pro, etc.) | ✅ | ✅ | ✅ |
 | xAI (Grok 4.3, etc.) | ✅ | ✅ | ✅ |
 | DeepSeek (V4 Pro, V4 Flash, etc.) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
@@ -445,11 +445,11 @@ Instead of listing model IDs, `--models` accepts a group shortcut. Groups are fi
 
 | Group | Models |
 |-------|--------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-7, gemini-3.1-pro, grok-4.3, deepseek-v4-pro, mistral-large-latest |
-| `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
-| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest |
-| `all-fast` | claude-haiku-4-5, gemini-3-flash, grok-4.1-fast, deepseek-v4-flash, llama-3.3-70b-versatile |
-| `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
+| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
+| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest, glm-5.2 |
+| `all-fast` | claude-haiku-4-5, gemini-3.5-flash, grok-4.20-0309-non-reasoning, deepseek-v4-flash, llama-3.3-70b-versatile, qwen3.6-flash, glm-5-turbo |
+| `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
 | `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
 **Dynamic groups** (resolved at runtime):
@@ -467,7 +467,7 @@ cli-modelarium "Explain CAP theorem" --models all-local
 
 Cli Modelarium uses a modular provider abstraction layer that hides the API differences between OpenAI's `messages` array, Anthropic's top-level `system` parameter, Google's `system_instruction`, and others. Every provider implements the same async streaming interface, so the CLI can run them all in parallel with `asyncio.gather()`.
 
-Cost calculations come from each provider's reported `usage` field (input tokens, output tokens, cached tokens) multiplied by current pricing constants. Pricing data was verified from official provider documentation on **June 21, 2026** - see [Notes & Limitations](#notes--limitations) for caveats.
+Cost calculations come from each provider's reported `usage` field (input tokens, output tokens, cached tokens) multiplied by current pricing constants. Pricing data was verified from official provider documentation on **June 22, 2026** - see [Notes & Limitations](#notes--limitations) for caveats.
 
 For local models, the same OpenAI Python SDK is used with a custom `base_url`, since Ollama, LM Studio, vLLM, and llama.cpp all expose OpenAI-compatible REST endpoints.
 
@@ -475,7 +475,7 @@ For local models, the same OpenAI Python SDK is used with a custom `base_url`, s
 
 ### Pricing data
 
-All pricing built into Cli Modelarium was verified from official provider documentation on **June 21, 2026**. LLM pricing changes frequently (sometimes monthly). The tool displays the `pricing_as_of` date in every output. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
+All pricing built into Cli Modelarium was verified from official provider documentation on **June 22, 2026**. LLM pricing changes frequently (sometimes monthly). The tool displays the `pricing_as_of` date in every output. Always verify against each provider's official pricing page before relying on cost calculations for budgeting or production decisions.
 
 Prices are each provider's standard/list public rate per 1M tokens (not batch, priority, off-peak, or promotional pricing); for input-size-tiered models the entry/short-context tier is shown, and cached pricing is the cache-read rate. DashScope/Qwen costs reflect non-thinking rates (the tool sends `enable_thinking=false`).
 
