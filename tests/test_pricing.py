@@ -17,7 +17,7 @@ from cli_modelarium.pricing import (
 
 class TestPricingAsOf:
     def test_constant_format(self) -> None:
-        assert PRICING_AS_OF == "2026-05-25"
+        assert PRICING_AS_OF == "2026-06-22"
 
     def test_freshness_note_includes_date(self) -> None:
         assert PRICING_AS_OF in pricing_freshness_note()
@@ -136,7 +136,7 @@ class TestPricingTableCoverage:
             "claude-sonnet-4-6",
             "claude-haiku-4-5",
             "gemini-3.5-flash",
-            "gemini-3.1-pro",
+            "gemini-3.1-pro-preview",
             "grok-4.3",
             "grok-4.1-fast",
             "deepseek-v4-pro",
