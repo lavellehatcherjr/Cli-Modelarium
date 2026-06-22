@@ -108,6 +108,8 @@ PROVIDER_REGISTRY: dict[str, str] = {
     "groq": "cli_modelarium.providers.groq_provider:GroqProvider",
     "openrouter": "cli_modelarium.providers.openrouter_provider:OpenRouterProvider",
     "mistral": "cli_modelarium.providers.mistral_provider:MistralProvider",
+    "dashscope": "cli_modelarium.providers.dashscope_provider:DashScopeProvider",
+    "zai": "cli_modelarium.providers.zai_provider:ZAIProvider",
     "local": "cli_modelarium.providers.local_provider:LocalProvider",
 }
 
@@ -414,6 +416,7 @@ def compare(
         model_list = parse_models_arg(models)
         if not model_list:
             raise click.UsageError("--models must include at least one model ID or group.")
+        model_list = _resolve_dynamic_groups(model_list, local_url)
         temp_list = _parse_temperatures(temperatures)
         system_prompt_list = _resolve_system_prompts(
             system_prompt=system_prompt,
@@ -910,6 +913,7 @@ def batch(
         model_list = parse_models_arg(models)
         if not model_list:
             raise click.UsageError("--models must include at least one model ID or group.")
+        model_list = _resolve_dynamic_groups(model_list, local_url)
         temp_list = _parse_temperatures(temperatures)
         command_sp_list = _resolve_system_prompts(
             system_prompt=system_prompt,
@@ -1835,6 +1839,92 @@ def _parse_temperatures(raw: str) -> list[float]:
         except ValueError:
             raise ValueError(f"Invalid temperature value: {token!r}") from None
     return out or [0.0]
+
+
+def _resolve_all_cloud() -> list[str]:
+    """Every cloud PRICING model whose provider has a configured API key.
+
+    Excludes local models and the OpenRouter entries (the latter are a few
+    representative/$0-fallback rows, not OpenRouter's full catalog).
+    """
+    out: list[str] = []
+    for model, entry in PRICING.items():
+        provider = str(entry.get("provider", ""))
+        if provider in ("local", "openrouter") or model.endswith("/*"):
+            continue
+        if is_key_configured(provider):
+            out.append(model)
+    return out
+
+
+def _resolve_all_local(local_url: str | None) -> list[str]:
+    """Models reported by a running local server, mapped to `local/<id>`.
+
+    Catches discovery failures (unreachable / timeout / bad response), prints a
+    friendly notice, and returns an empty list rather than raising - the outer
+    compare/batch try/except does NOT catch httpx errors, so they must be handled
+    here or they become an uncaught traceback.
+    """
+    url = local_url or load_local_url() or LocalProvider.DEFAULT_URL
+    try:
+        entries = asyncio.run(LocalProvider.discover_models(url))
+    except (
+        httpx.ConnectError,
+        httpx.TimeoutException,
+        httpx.HTTPStatusError,
+        httpx.RequestError,
+    ):
+        console.print(
+            Panel(
+                f"Could not reach a local server at {url}.\n"
+                f"Is Ollama / LM Studio / vLLM / llama.cpp running? "
+                f"Override the URL with --local-url.",
+                title="all-local",
+                border_style="yellow",
+            )
+        )
+        return []
+    except ModelariumError as e:
+        # Localhost guard (LocalURLError) is a config error, not an unreachable
+        # server - convert to ValueError so the outer block surfaces it as exit 2.
+        raise ValueError(str(e)) from None
+    return [f"local/{entry['id']}" for entry in entries if entry.get("id")]
+
+
+def _resolve_dynamic_groups(model_list: list[str], local_url: str | None) -> list[str]:
+    """Resolve the dynamic group tokens `all` / `all-local` against runtime state.
+
+    `all`       -> every cloud model with a configured API key (cloud half).
+    `all-local` -> every model a running local server reports (live half).
+    Other tokens pass through unchanged. The result is de-duplicated,
+    order-preserving (first occurrence wins).
+
+    Resolution lives in the caller (not in parse_models_arg) so token parsing
+    stays a pure, network-free function.
+    """
+    resolved: list[str] = []
+    requested_all = False
+    for token in model_list:
+        if token == "all":
+            requested_all = True
+            resolved.extend(_resolve_all_cloud())
+        elif token == "all-local":
+            resolved.extend(_resolve_all_local(local_url))
+        else:
+            resolved.append(token)
+
+    deduped = list(dict.fromkeys(resolved))
+    if not deduped:
+        if requested_all:
+            raise ValueError(
+                "No API keys configured for any cloud provider. Configure one with "
+                "`cli-modelarium keys set <provider>`, or pass explicit model IDs."
+            )
+        raise ValueError(
+            "No models to run: no local server models were found. Start a local "
+            "server, or pass explicit model IDs."
+        )
+    return deduped
 
 
 def _resolve_system_prompts(
