@@ -13,10 +13,10 @@
 
 set -euo pipefail
 
-cli-modelarium batch examples/hallucination_test.json \
+cli-modelarium "When was the first Moon landing, and who was the first person to walk on the Moon?" \
   --models gpt-5.5,claude-opus-4-7 \
   --runs 20 \
-  --judge gemini-3.1-pro \
+  --judge gemini-3.1-pro-preview \
   --check-hallucination \
   --expected-facts-file examples/expected_facts_example.txt \
   --bootstrap-seed 42 \
