@@ -5,5 +5,5 @@
 set -euo pipefail
 
 cli-modelarium "Explain quantum entanglement in 2 sentences." \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview \
   --temperatures 0.7
