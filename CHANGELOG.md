@@ -4,6 +4,36 @@ All notable changes to Cli Modelarium will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-06-22
+
+### Added
+
+- DashScope (Alibaba Model Studio, International/Singapore endpoint) provider with 6 Qwen models (qwen3.7-max, qwen3.7-plus, qwen3.6-flash, qwen3.6-plus, qwen-flash, qwen3-coder-plus). Uses `DASHSCOPE_API_KEY`. Sends `enable_thinking=false` so costs reflect non-thinking rates. Added an `_extra_create_kwargs()` hook to the OpenAI-compatible base (default no-op) to support this.
+- `--models all` now resolves to every cloud model with a configured API key (excludes local and OpenRouter); `--models all-local` resolves to the models reported by a running local server, with a clear message when none is reachable. Previously these tokens errored with "Unknown model."
+- Documented the model-group shortcuts (static groups + `all`/`all-local`) in the README.
+- Added Python 3.14 to the tested CI matrix (the 3.14 classifier was already declared; CI now exercises it). Minimum supported version remains 3.11.
+- Z.AI/GLM provider (Zhipu AI, OpenAI-compatible overseas endpoint) with 14 GLM text models (glm-5.2, glm-5.1, glm-5, glm-5-turbo, glm-4.7, glm-4.7-flash, glm-4.7-flashx, glm-4.6, glm-4.5, glm-4.5-air, glm-4.5-x, glm-4.5-airx, glm-4.5-flash, glm-4-32b-0414-128k), including the free glm-4.7-flash / glm-4.5-flash. Uses `ZAI_API_KEY`; reuses the existing OpenAI-compatible stack (no new dependency).
+- Current Claude models: claude-fable-5 (new frontier tier), claude-opus-4-8 (recommended Opus flagship), claude-opus-4-5, claude-sonnet-4-5. The `all-premium` / `all-flagship` groups now point at claude-opus-4-8.
+- Added Z.AI/GLM and Alibaba/Qwen models to the static model groups: `all-premium`/`all-flagship` (qwen3.7-max, glm-5.2), `all-budget` (qwen3.7-plus, glm-4.5-air), `all-fast` (qwen3.6-flash, glm-5-turbo), `all-cheap` (qwen-flash, glm-4.7-flashx), and glm-5.2 in `all-reasoning`. Qwen is intentionally excluded from `all-reasoning`: the DashScope provider sends `enable_thinking=false`, so a Qwen model there would run non-thinking; glm-5.2 reasons by default through the Z.AI provider.
+
+### Changed
+
+- Corrected pricing to first-party provider rates (OpenAI o3/o3-pro/gpt-5.4-pro + cached rates; Google Gemini flash/flash-lite; Mistral medium/small; Groq gpt-oss/llama-4-scout; DeepSeek v4-pro/v4-flash/chat/reasoner).
+- Corrected `gemini-3.1-pro` pricing to first-party rates (2.00/12.00/0.20) and renamed it to `gemini-3.1-pro-preview` to match the live API model id (the Gemini provider sends the id verbatim).
+- Corrected `grok-4.20` and `grok-4.20-multi-agent` pricing to first-party rates (1.25/2.50) and updated their model ids to the live dated strings (`grok-4.20-0309-non-reasoning`, `grok-4.20-multi-agent-0309`).
+- Repaired static model groups: replaced retired `grok-4.1-fast` (all-budget/all-fast) with `grok-4.20-0309-non-reasoning` and removed it from all-cheap; replaced `gemini-3-flash` with `gemini-3.5-flash` in all-fast. (`deepseek-reasoner` in all-reasoning is intentionally retained this release; its swap to a confirmed thinking-capable v4 id is deferred pending a live check before its 2026-07-24 deprecation.)
+- Added OpenAI cache-read rates (`gpt-5`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`).
+- Synced the README and all 8 translations to the current model groups, provider list, and pricing date; tightened the local-server ("running on localhost") and per-call model-selection feature descriptions for accuracy.
+- Re-verified all provider pricing against first-party pages (2026-06-22). Bumped `PRICING_AS_OF` to 2026-06-22.
+
+### Fixed
+
+- The Google provider now also accepts `GEMINI_API_KEY` (the documented alias was previously ignored; only `GOOGLE_API_KEY` was read). `GOOGLE_API_KEY` still takes precedence.
+
+### Dependencies
+
+- No dependency changes.
+
 ## [0.1.3] - 2026-05-28
 
 ### Added
