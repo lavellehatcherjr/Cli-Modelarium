@@ -32,5 +32,12 @@
         }
       }
     ]
+  },
+  {
+    "id": "exact_match",
+    "prompt": "What is 2+2? Reply with only the number, nothing else.",
+    "assertions": [
+      {"type": "equals", "value": "4"}
+    ]
   }
 ]
