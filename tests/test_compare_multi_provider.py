@@ -78,7 +78,7 @@ async def test_runs_three_providers_in_parallel() -> None:
 
     states = await run_streaming_comparison(
         prompt="test prompt",
-        models=["gpt-5.5", "claude-opus-4-7", "gemini-3.1-pro"],
+        models=["gpt-5.5", "claude-opus-4-7", "gemini-3.1-pro-preview"],
         temperatures=[0.0],
         system_prompts=[None],
         provider_factory=lambda name: fakes[name],
@@ -103,7 +103,7 @@ async def test_one_failure_does_not_kill_others() -> None:
 
     states = await run_streaming_comparison(
         prompt="p",
-        models=["gpt-5.5", "claude-opus-4-7", "gemini-3.1-pro"],
+        models=["gpt-5.5", "claude-opus-4-7", "gemini-3.1-pro-preview"],
         temperatures=[0.0],
         system_prompts=[None],
         provider_factory=lambda name: fakes[name],
