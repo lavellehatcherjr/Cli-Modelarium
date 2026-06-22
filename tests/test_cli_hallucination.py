@@ -314,7 +314,7 @@ class TestPanelAggregation:
         # Custom fake that returns different risk levels per judge model.
         responses = {
             "claude-opus-4-7": '{"score": 9, "risk_level": "Low", "reasoning": "x"}',
-            "gemini-3.1-pro": '{"score": 5, "risk_level": "Medium", "reasoning": "x"}',
+            "gemini-3.1-pro-preview": '{"score": 5, "risk_level": "Medium", "reasoning": "x"}',
             "grok-4.3": '{"score": 2, "risk_level": "High", "reasoning": "x"}',
         }
 
@@ -375,7 +375,7 @@ class TestPanelAggregation:
                 "--models",
                 "gpt-5.5",
                 "--judges",
-                "claude-opus-4-7,gemini-3.1-pro,grok-4.3",
+                "claude-opus-4-7,gemini-3.1-pro-preview,grok-4.3",
                 "--check-hallucination",
                 "--no-stream",
                 "--no-judge-tos",
