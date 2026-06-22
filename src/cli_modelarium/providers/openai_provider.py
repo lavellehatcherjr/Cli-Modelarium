@@ -48,6 +48,15 @@ class OpenAIProvider(BaseProvider):
         """Subclass hook for providers that need to rewrite the model ID (e.g. LocalProvider)."""
         return model
 
+    def _extra_create_kwargs(self) -> dict:
+        """Subclass hook for extra chat.completions.create() kwargs.
+
+        Defaults to an empty dict (no-op) so every existing OpenAI-compatible
+        provider is unaffected. DashScope overrides this to send
+        `enable_thinking=False` via `extra_body`.
+        """
+        return {}
+
     def _build_messages(self, prompt: str, system_prompt: str | None) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = []
         if system_prompt:
@@ -70,6 +79,7 @@ class OpenAIProvider(BaseProvider):
                 messages=messages,
                 temperature=temperature,
                 stream=True,
+                **self._extra_create_kwargs(),
             )
             async for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content:
@@ -111,6 +121,7 @@ class OpenAIProvider(BaseProvider):
                 temperature=temperature,
                 stream=True,
                 stream_options={"include_usage": True},
+                **self._extra_create_kwargs(),
             )
             async for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content:
