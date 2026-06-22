@@ -9,9 +9,9 @@
 set -euo pipefail
 
 cli-modelarium "Solve this step by step: What is 247 multiplied by 389?" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview \
   --runs 30 \
-  --judge mistral-large \
+  --judge mistral-large-latest \
   --significance-test welch \
   --correction holm \
   --significance-threshold 0.01 \
