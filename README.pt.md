@@ -9,7 +9,7 @@ Nota: Este README é traduzido para acessibilidade. A própria ferramenta CLI Cl
 
 > Note: Features added after v0.1.0 (`--runs` in v0.1.1, statistical significance in v0.1.2, confidence intervals/paired tests/McNemar in v0.1.3) are documented in English only — translations pending.
 
-> Compare saídas de LLM lado a lado do seu terminal - 9 provedores de nuvem + modelos locais, com streaming paralelo, avaliação em lote, pontuação LLM-as-judge, detecção de alucinação e asserções prontas para CI/CD.
+> Compare saídas de LLM lado a lado do seu terminal - 10 provedores de nuvem + modelos locais, com streaming paralelo, avaliação em lote, pontuação LLM-as-judge, detecção de alucinação e asserções prontas para CI/CD.
 
 [![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -38,7 +38,7 @@ cli-modelarium configure
 
 # Execute sua primeira comparação
 cli-modelarium "Explain quantum computing in one sentence" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
+  --models gpt-5.5,claude-opus-4-8,gemini-3.1-pro-preview \
   --temperatures 0,0.7
 ```
 
@@ -46,19 +46,19 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ## Recursos
 
-### 🤖 Provedores (9 na nuvem + locais ilimitados)
+### 🤖 Provedores (10 na nuvem + locais ilimitados)
 
-- **Provedores de nuvem:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope)
-- **Modelos locais:** Ollama, LM Studio, vLLM, llama.cpp - qualquer servidor local compatível com OpenAI
+- **Provedores de nuvem:** OpenAI, Anthropic, Google (Gemini), xAI (Grok), DeepSeek, Mistral, Groq, OpenRouter, Alibaba (DashScope), Z.AI (GLM)
+- **Modelos locais:** Ollama, LM Studio, vLLM, llama.cpp - qualquer servidor compatível com OpenAI em execução no localhost
 - Combine modelos locais e em nuvem na mesma comparação
-- Seleção de modelo configurável por chamada (sem listas codificadas)
+- Escolha qualquer ID de modelo registrado por chamada - sem se limitar aos atalhos de grupo integrados
 
 ### ⚡ Streaming paralelo
 
 - Exibição ao vivo token por token em todos os modelos simultaneamente
 - Rastreamento de Time-to-First-Token (TTFT) por modelo
 - Veja qual modelo termina primeiro, observe as saídas divergirem em tempo real
-- Streams de todos os 9 provedores (SSE por baixo)
+- Streams de todos os 10 provedores (SSE por baixo)
 
 ### 📊 Múltiplos modos de comparação
 
@@ -131,7 +131,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ```bash
 cli-modelarium "Write a Python function to find the longest palindromic substring" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview
 ```
 
 ### Avaliação em lote com asserções
@@ -170,7 +170,7 @@ cli-modelarium batch eval.json \
 
 ```bash
 cli-modelarium "Explain recursion in one paragraph" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro,local/llama-3.3-70b \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview,local/llama-3.3-70b \
   --judge claude-opus-4-7 \
   --judge-criteria "accuracy,clarity,brevity"
 ```
@@ -261,14 +261,15 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | Provedor | Chaves de API Necessárias | Streaming | Rastreamento de Custos |
 |----------|-----------------|-----------|---------------|
 | OpenAI (GPT-5, GPT-5 mini, o3, o4-mini, etc.) | ✅ | ✅ | ✅ |
-| Anthropic (Claude Opus 4.7, Sonnet 4.6, Haiku 4.5, etc.) | ✅ | ✅ | ✅ |
-| Google (Gemini 3.1 Pro, Gemini 3 Flash, etc.) | ✅ | ✅ | ✅ |
+| Anthropic (Claude Opus 4.8, Sonnet 4.6, Haiku 4.5, etc.) | ✅ | ✅ | ✅ |
+| Google (Gemini 3.5 Flash, Gemini 3.1 Pro, etc.) | ✅ | ✅ | ✅ |
 | xAI (Grok 4.3, etc.) | ✅ | ✅ | ✅ |
 | DeepSeek (V4 Pro, V4 Flash, etc.) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
 | Groq (Llama, Mixtral, etc.) | ✅ | ✅ | ✅ |
 | OpenRouter (qualquer modelo na plataforma) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder, etc.; modelos Qwen selecionados, Internacional/Singapura) | ✅ | ✅ | ✅ |
+| Z.AI/GLM (GLM-5.2, GLM-4.7, GLM-4.5 Air, etc.; compatível com OpenAI, endpoint internacional) | ✅ | ✅ | ✅ |
 | **Local: Ollama** | ❌ | ✅ | Gratuito |
 | **Local: LM Studio** | ❌ | ✅ | Gratuito |
 | **Local: vLLM** | ❌ | ✅ | Gratuito |
@@ -284,11 +285,11 @@ Em vez de listar IDs de modelos, `--models` aceita um atalho de grupo. Os grupos
 
 | Grupo | Modelos |
 |-------|---------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-7, gemini-3.1-pro, grok-4.3, deepseek-v4-pro, mistral-large-latest |
-| `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
-| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest |
-| `all-fast` | claude-haiku-4-5, gemini-3-flash, grok-4.1-fast, deepseek-v4-flash, llama-3.3-70b-versatile |
-| `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
+| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
+| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest, glm-5.2 |
+| `all-fast` | claude-haiku-4-5, gemini-3.5-flash, grok-4.20-0309-non-reasoning, deepseek-v4-flash, llama-3.3-70b-versatile, qwen3.6-flash, glm-5-turbo |
+| `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
 | `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
 **Grupos dinâmicos** (resolvidos em tempo de execução):
@@ -306,7 +307,7 @@ cli-modelarium "Explique o teorema CAP" --models all-local
 
 Cli Modelarium usa uma camada de abstração de provedor modular que oculta as diferenças de API entre o array `messages` do OpenAI, o parâmetro `system` de nível superior do Anthropic, o `system_instruction` do Google e outros. Cada provedor implementa a mesma interface de streaming assíncrono, então a CLI pode executá-los todos em paralelo com `asyncio.gather()`.
 
-Os cálculos de custo vêm do campo `usage` reportado por cada provedor (tokens de entrada, tokens de saída, tokens em cache) multiplicado pelas constantes de preço atuais. Os dados de preço foram verificados a partir da documentação oficial do provedor em **21 de junho de 2026** - veja [Notas e Limitações](#notas-e-limitações) para ressalvas.
+Os cálculos de custo vêm do campo `usage` reportado por cada provedor (tokens de entrada, tokens de saída, tokens em cache) multiplicado pelas constantes de preço atuais. Os dados de preço foram verificados a partir da documentação oficial do provedor em **22 de junho de 2026** - veja [Notas e Limitações](#notas-e-limitações) para ressalvas.
 
 Para modelos locais, o mesmo SDK Python da OpenAI é usado com uma `base_url` personalizada, já que Ollama, LM Studio, vLLM e llama.cpp expõem endpoints REST compatíveis com OpenAI.
 
@@ -314,7 +315,7 @@ Para modelos locais, o mesmo SDK Python da OpenAI é usado com uma `base_url` pe
 
 ### Dados de preço
 
-Todos os preços incorporados ao Cli Modelarium foram verificados a partir da documentação oficial do provedor em **21 de junho de 2026**. Os preços de LLM mudam com frequência (às vezes mensalmente). A ferramenta exibe a data `pricing_as_of` em cada saída. Sempre verifique com a página oficial de preços de cada provedor antes de confiar em cálculos de custo para orçamento ou decisões de produção.
+Todos os preços incorporados ao Cli Modelarium foram verificados a partir da documentação oficial do provedor em **22 de junho de 2026**. Os preços de LLM mudam com frequência (às vezes mensalmente). A ferramenta exibe a data `pricing_as_of` em cada saída. Sempre verifique com a página oficial de preços de cada provedor antes de confiar em cálculos de custo para orçamento ou decisões de produção.
 
 Os preços são a tarifa pública padrão/de tabela de cada provedor por 1M de tokens (não preços em lote, prioritários, fora de pico ou promocionais); para modelos com tiers baseados no tamanho da entrada, é exibido o tier inicial/de contexto curto, e o preço em cache é a tarifa de leitura de cache. Os custos do DashScope/Qwen refletem as tarifas sem raciocínio (a ferramenta envia `enable_thinking=false`).
 
