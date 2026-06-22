@@ -507,7 +507,7 @@ def test_streaming_display_renders_panels() -> None:
             model="grok-4.3", provider_name="xai", temperature=0.0, status="error", error="boom"
         ),
         StreamState(
-            model="gemini-3.1-pro",
+            model="gemini-3.1-pro-preview",
             provider_name="google",
             temperature=0.0,
             status="retrying",
