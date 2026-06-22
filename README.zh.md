@@ -9,7 +9,7 @@
 
 > Note: Features added after v0.1.0 (`--runs` in v0.1.1, statistical significance in v0.1.2, confidence intervals/paired tests/McNemar in v0.1.3) are documented in English only — translations pending.
 
-> 在终端中并排比较 LLM 输出 - 9 个云服务提供商 + 本地模型，支持并行流式传输、批量评估、LLM-as-judge 评分、幻觉检测和 CI/CD 就绪的断言。
+> 在终端中并排比较 LLM 输出 - 10 个云服务提供商 + 本地模型，支持并行流式传输、批量评估、LLM-as-judge 评分、幻觉检测和 CI/CD 就绪的断言。
 
 [![CI](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml/badge.svg)](https://github.com/lavellehatcherjr/Cli-Modelarium/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/cli-modelarium)](https://pypi.org/project/cli-modelarium/)
@@ -38,7 +38,7 @@ cli-modelarium configure
 
 # 运行您的第一次比较
 cli-modelarium "Explain quantum computing in one sentence" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro \
+  --models gpt-5.5,claude-opus-4-8,gemini-3.1-pro-preview \
   --temperatures 0,0.7
 ```
 
@@ -46,19 +46,19 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ## 特性
 
-### 🤖 提供商（9 个云端 + 无限本地）
+### 🤖 提供商（10 个云端 + 无限本地）
 
-- **云服务提供商:** OpenAI、Anthropic、Google (Gemini)、xAI (Grok)、DeepSeek、Mistral、Groq、OpenRouter、Alibaba (DashScope)
-- **本地模型:** Ollama、LM Studio、vLLM、llama.cpp - 任何 OpenAI 兼容的本地服务器
+- **云服务提供商:** OpenAI、Anthropic、Google (Gemini)、xAI (Grok)、DeepSeek、Mistral、Groq、OpenRouter、Alibaba (DashScope)、Z.AI (GLM)
+- **本地模型:** Ollama、LM Studio、vLLM、llama.cpp - 任何在 localhost 上运行的 OpenAI 兼容服务器
 - 在同一比较中混合使用本地和云模型
-- 每次调用可配置的模型选择（无硬编码列表）
+- 每次调用可选择任何已注册的模型 ID - 不限于内置的分组快捷方式
 
 ### ⚡ 并行流式传输
 
 - 同时跨所有模型逐令牌实时显示
 - 每个模型的 Time-to-First-Token (TTFT) 跟踪
 - 查看哪个模型首先完成，实时观察输出分歧
-- 来自所有 9 个提供商的流（底层使用 SSE）
+- 来自所有 10 个提供商的流（底层使用 SSE）
 
 ### 📊 多种比较模式
 
@@ -131,7 +131,7 @@ cli-modelarium "Explain quantum computing in one sentence" \
 
 ```bash
 cli-modelarium "Write a Python function to find the longest palindromic substring" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview
 ```
 
 ### 带断言的批量评估
@@ -170,7 +170,7 @@ cli-modelarium batch eval.json \
 
 ```bash
 cli-modelarium "Explain recursion in one paragraph" \
-  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro,local/llama-3.3-70b \
+  --models gpt-5.5,claude-opus-4-7,gemini-3.1-pro-preview,local/llama-3.3-70b \
   --judge claude-opus-4-7 \
   --judge-criteria "accuracy,clarity,brevity"
 ```
@@ -261,14 +261,15 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 | 提供商 | 需要 API 密钥 | 流式传输 | 成本跟踪 |
 |----------|-----------------|-----------|---------------|
 | OpenAI (GPT-5, GPT-5 mini, o3, o4-mini 等) | ✅ | ✅ | ✅ |
-| Anthropic (Claude Opus 4.7, Sonnet 4.6, Haiku 4.5 等) | ✅ | ✅ | ✅ |
-| Google (Gemini 3.1 Pro, Gemini 3 Flash 等) | ✅ | ✅ | ✅ |
+| Anthropic (Claude Opus 4.8, Sonnet 4.6, Haiku 4.5 等) | ✅ | ✅ | ✅ |
+| Google (Gemini 3.5 Flash, Gemini 3.1 Pro 等) | ✅ | ✅ | ✅ |
 | xAI (Grok 4.3 等) | ✅ | ✅ | ✅ |
 | DeepSeek (V4 Pro, V4 Flash 等) | ✅ | ✅ | ✅ |
 | Mistral (Large, Medium, Small) | ✅ | ✅ | ✅ |
 | Groq (Llama, Mixtral 等) | ✅ | ✅ | ✅ |
 | OpenRouter (平台上的任何模型) | ✅ | ✅ | ✅ |
 | Alibaba/DashScope (Qwen3.7 Max, Qwen3.6 Flash, Qwen3 Coder 等；精选 Qwen 模型，国际/新加坡) | ✅ | ✅ | ✅ |
+| Z.AI/GLM (GLM-5.2、GLM-4.7、GLM-4.5 Air 等；OpenAI 兼容，海外端点) | ✅ | ✅ | ✅ |
 | **本地: Ollama** | ❌ | ✅ | 免费 |
 | **本地: LM Studio** | ❌ | ✅ | 免费 |
 | **本地: vLLM** | ❌ | ✅ | 免费 |
@@ -284,11 +285,11 @@ cli-modelarium keys set local --base-url http://localhost:1234/v1
 
 | 组 | 模型 |
 |-------|--------|
-| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-7, gemini-3.1-pro, grok-4.3, deepseek-v4-pro, mistral-large-latest |
-| `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
-| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest |
-| `all-fast` | claude-haiku-4-5, gemini-3-flash, grok-4.1-fast, deepseek-v4-flash, llama-3.3-70b-versatile |
-| `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, grok-4.1-fast, deepseek-v4-flash, mistral-small-latest |
+| `all-premium` / `all-flagship` | gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview, grok-4.3, deepseek-v4-pro, mistral-large-latest, qwen3.7-max, glm-5.2 |
+| `all-budget` | gpt-5.4-nano, claude-haiku-4-5, gemini-3.1-flash-lite, grok-4.20-0309-non-reasoning, deepseek-v4-flash, mistral-small-latest, qwen3.7-plus, glm-4.5-air |
+| `all-reasoning` | o3, o4-mini, deepseek-reasoner, magistral-medium-latest, magistral-small-latest, glm-5.2 |
+| `all-fast` | claude-haiku-4-5, gemini-3.5-flash, grok-4.20-0309-non-reasoning, deepseek-v4-flash, llama-3.3-70b-versatile, qwen3.6-flash, glm-5-turbo |
+| `all-cheap` | gpt-4o-mini, claude-haiku-4-5, gemini-2.5-flash-lite, deepseek-v4-flash, mistral-small-latest, qwen-flash, glm-4.7-flashx |
 | `all-open-weight` | gpt-oss-120b, gpt-oss-20b, llama-3.3-70b-versatile, meta-llama/llama-4-scout-17b-16e-instruct |
 
 **动态组**（在运行时解析）：
@@ -306,7 +307,7 @@ cli-modelarium "解释 CAP 定理" --models all-local
 
 Cli Modelarium 使用模块化的提供商抽象层，隐藏了 OpenAI 的 `messages` 数组、Anthropic 的顶级 `system` 参数、Google 的 `system_instruction` 以及其他 API 之间的差异。每个提供商都实现了相同的异步流式接口，因此 CLI 可以使用 `asyncio.gather()` 并行运行它们。
 
-成本计算来自每个提供商报告的 `usage` 字段（输入令牌、输出令牌、缓存令牌）乘以当前定价常数。定价数据于 **2026 年 6 月 21 日** 从官方提供商文档中验证 - 详细注意事项请参阅 [注意事项与限制](#注意事项与限制)。
+成本计算来自每个提供商报告的 `usage` 字段（输入令牌、输出令牌、缓存令牌）乘以当前定价常数。定价数据于 **2026 年 6 月 22 日** 从官方提供商文档中验证 - 详细注意事项请参阅 [注意事项与限制](#注意事项与限制)。
 
 对于本地模型，使用相同的 OpenAI Python SDK 加上自定义 `base_url`，因为 Ollama、LM Studio、vLLM 和 llama.cpp 都暴露了 OpenAI 兼容的 REST 端点。
 
@@ -314,7 +315,7 @@ Cli Modelarium 使用模块化的提供商抽象层，隐藏了 OpenAI 的 `mess
 
 ### 定价数据
 
-Cli Modelarium 内置的所有定价均于 **2026 年 6 月 21 日** 从官方提供商文档中验证。LLM 定价经常变化（有时每月一次）。该工具在每个输出中显示 `pricing_as_of` 日期。在依赖成本计算进行预算或生产决策之前，请始终对照每个提供商的官方定价页面进行验证。
+Cli Modelarium 内置的所有定价均于 **2026 年 6 月 22 日** 从官方提供商文档中验证。LLM 定价经常变化（有时每月一次）。该工具在每个输出中显示 `pricing_as_of` 日期。在依赖成本计算进行预算或生产决策之前，请始终对照每个提供商的官方定价页面进行验证。
 
 价格为每个提供商每 100 万令牌的标准/标价公开费率（非批量、优先、非高峰或促销定价）；对于按输入大小分层的模型，显示入门/短上下文层级，缓存定价为缓存读取费率。DashScope/Qwen 成本反映非思考费率（该工具发送 `enable_thinking=false`）。
 
