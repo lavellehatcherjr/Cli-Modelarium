@@ -50,6 +50,18 @@ KEY_PATTERNS: dict[str, re.Pattern[str]] = {
     "mistral": re.compile(r"^[A-Za-z0-9]{20,}$"),
     "groq": re.compile(r"^gsk_[A-Za-z0-9_-]{20,}$"),
     "openrouter": re.compile(r"^sk-or-[A-Za-z0-9_-]{20,}$"),
+    "dashscope": re.compile(r"^sk-[A-Za-z0-9_-]{20,}$"),
+    # Z.AI keys are commonly an `id.secret` token; accept dots alongside the
+    # usual key characters. Shape-only check (length floor matches the others).
+    "zai": re.compile(r"^[A-Za-z0-9._-]{20,}$"),
+}
+
+# Secondary environment-variable aliases, consulted ONLY after the primary
+# {PROVIDER}_API_KEY env var and before the keyring. Lets the Google provider
+# also accept GEMINI_API_KEY (the google-genai SDK convention). The primary
+# var (GOOGLE_API_KEY) still wins when both are set.
+_ENV_ALIASES: dict[str, list[str]] = {
+    "google": ["GEMINI_API_KEY"],
 }
 
 # Ordered most-specific-first so prefixed keys aren't swallowed by the
@@ -127,6 +139,13 @@ def load_key(provider: str) -> str | None:
     env_value = os.environ.get(env_var)
     if env_value:
         return env_value.strip()
+
+    # Secondary aliases (e.g. GEMINI_API_KEY for google), checked only after the
+    # primary var so GOOGLE_API_KEY keeps precedence.
+    for alias in _ENV_ALIASES.get(provider, ()):
+        alias_value = os.environ.get(alias)
+        if alias_value:
+            return alias_value.strip()
 
     try:
         return keyring.get_password(SERVICE_NAME, provider)
